@@ -2,8 +2,10 @@
 
 Usage: python scripts/render_brand.py custom_components/solarsplit/brand (needs Pillow; uses Segoe UI Bold).
 """
-import math, sys
+import math
+import sys
 from pathlib import Path
+
 from PIL import Image, ImageDraw, ImageFont
 
 out = Path(sys.argv[1]); out.mkdir(parents=True, exist_ok=True)
