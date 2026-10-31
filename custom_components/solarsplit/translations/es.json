@@ -18,7 +18,8 @@
           "smoothing_window": "Ventana de suavizado",
           "settle_time": "Tiempo de asentamiento",
           "on_margin": "Margen de encendido",
-          "import_tolerance": "Tolerancia de importación"
+          "import_tolerance": "Tolerancia de importación",
+          "shadow_mode": "Modo sombra"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Señal principal del bucle.",
@@ -31,7 +32,8 @@
           "smoothing_window": "Media móvil aplicada a las lecturas para filtrar nubes y picos.",
           "settle_time": "Espera tras un cambio antes del siguiente.",
           "on_margin": "Potencia extra, además de la suya, que necesita una carga para encenderse.",
-          "import_tolerance": "Importación de red tolerada antes de apagar una carga."
+          "import_tolerance": "Importación de red tolerada antes de apagar una carga.",
+          "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas."
         }
       }
     }
@@ -51,7 +53,8 @@
           "smoothing_window": "Ventana de suavizado",
           "settle_time": "Tiempo de asentamiento",
           "on_margin": "Margen de encendido",
-          "import_tolerance": "Tolerancia de importación"
+          "import_tolerance": "Tolerancia de importación",
+          "shadow_mode": "Modo sombra"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Señal principal del bucle.",
@@ -64,8 +67,112 @@
           "smoothing_window": "Media móvil aplicada a las lecturas para filtrar nubes y picos.",
           "settle_time": "Espera tras un cambio antes del siguiente.",
           "on_margin": "Potencia extra, además de la suya, que necesita una carga para encenderse.",
-          "import_tolerance": "Importación de red tolerada antes de apagar una carga."
+          "import_tolerance": "Importación de red tolerada antes de apagar una carga.",
+          "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas."
         }
+      }
+    }
+  },
+  "config_subentries": {
+    "load": {
+      "entry_type": "Carga",
+      "initiate_flow": {
+        "user": "Añadir carga"
+      },
+      "step": {
+        "user": {
+          "title": "Añadir carga",
+          "data": {
+            "name": "Nombre",
+            "entity_id": "Entidad",
+            "nominal_power": "Potencia nominal",
+            "power_sensor": "Sensor de potencia",
+            "priority": "Prioridad",
+            "no_skip": "No saltar",
+            "on_delay": "Retardo de encendido",
+            "off_delay": "Retardo de apagado",
+            "min_on": "Tiempo mínimo encendida",
+            "min_off": "Tiempo mínimo apagada",
+            "respect_global_condition": "Respetar la condición global",
+            "condition_entity": "Entidad de condición de uso",
+            "condition_state": "Estado de la condición de uso",
+            "respect_manual": "Respetar cambios manuales",
+            "hvac_mode": "Modo de climatización al encender",
+            "variable_entity": "Regulada externamente cuando"
+          },
+          "data_description": {
+            "name": "Se muestra en el dispositivo de la carga.",
+            "entity_id": "Interruptor, input boolean o climatización que enciende y apaga la carga.",
+            "nominal_power": "Potencia que consume la carga encendida.",
+            "power_sensor": "Potencia medida de la carga. Si se indica, se usa en lugar de la nominal.",
+            "priority": "La 1 se atiende primero.",
+            "no_skip": "Solo se enciende si todas las cargas elegibles anteriores están encendidas.",
+            "on_delay": "El excedente debe cubrir la carga durante este tiempo antes de encenderla.",
+            "off_delay": "El déficit debe durar este tiempo antes de apagar la carga.",
+            "min_on": "Nunca se apaga antes de este tiempo tras encenderla. Protege compresores y bombas.",
+            "min_off": "Nunca se enciende antes de este tiempo tras apagarla.",
+            "respect_global_condition": "Si la condición global está apagada, la carga se deja como esté.",
+            "condition_entity": "La carga solo se usa mientras esta entidad tenga el estado indicado abajo.",
+            "condition_state": "Estado que debe tener la entidad de condición de uso, por ejemplo on.",
+            "respect_manual": "Si otro cambia la carga, SolarSplit deja de controlarla hasta que vuelva al estado que él puso.",
+            "hvac_mode": "Solo para entidades de climatización.",
+            "variable_entity": "Mientras esta entidad esté encendida (por ejemplo FreeDS maestro), la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta."
+          }
+        },
+        "reconfigure": {
+          "title": "Editar carga",
+          "data": {
+            "name": "Nombre",
+            "entity_id": "Entidad",
+            "nominal_power": "Potencia nominal",
+            "power_sensor": "Sensor de potencia",
+            "priority": "Prioridad",
+            "no_skip": "No saltar",
+            "on_delay": "Retardo de encendido",
+            "off_delay": "Retardo de apagado",
+            "min_on": "Tiempo mínimo encendida",
+            "min_off": "Tiempo mínimo apagada",
+            "respect_global_condition": "Respetar la condición global",
+            "condition_entity": "Entidad de condición de uso",
+            "condition_state": "Estado de la condición de uso",
+            "respect_manual": "Respetar cambios manuales",
+            "hvac_mode": "Modo de climatización al encender",
+            "variable_entity": "Regulada externamente cuando"
+          },
+          "data_description": {
+            "name": "Se muestra en el dispositivo de la carga.",
+            "entity_id": "Interruptor, input boolean o climatización que enciende y apaga la carga.",
+            "nominal_power": "Potencia que consume la carga encendida.",
+            "power_sensor": "Potencia medida de la carga. Si se indica, se usa en lugar de la nominal.",
+            "priority": "La 1 se atiende primero.",
+            "no_skip": "Solo se enciende si todas las cargas elegibles anteriores están encendidas.",
+            "on_delay": "El excedente debe cubrir la carga durante este tiempo antes de encenderla.",
+            "off_delay": "El déficit debe durar este tiempo antes de apagar la carga.",
+            "min_on": "Nunca se apaga antes de este tiempo tras encenderla. Protege compresores y bombas.",
+            "min_off": "Nunca se enciende antes de este tiempo tras apagarla.",
+            "respect_global_condition": "Si la condición global está apagada, la carga se deja como esté.",
+            "condition_entity": "La carga solo se usa mientras esta entidad tenga el estado indicado abajo.",
+            "condition_state": "Estado que debe tener la entidad de condición de uso, por ejemplo on.",
+            "respect_manual": "Si otro cambia la carga, SolarSplit deja de controlarla hasta que vuelva al estado que él puso.",
+            "hvac_mode": "Solo para entidades de climatización.",
+            "variable_entity": "Mientras esta entidad esté encendida (por ejemplo FreeDS maestro), la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta."
+          }
+        }
+      },
+      "error": {
+        "entity_in_use": "Esta entidad ya pertenece a otra carga."
+      }
+    }
+  },
+  "selector": {
+    "hvac_mode": {
+      "options": {
+        "cool": "Frío",
+        "heat": "Calor",
+        "dry": "Deshumidificar",
+        "fan_only": "Solo ventilador",
+        "heat_cool": "Frío/calor",
+        "auto": "Automático"
       }
     }
   }

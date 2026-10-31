@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0 (unreleased)
+
+- Loads as config subentries: add, edit and delete each load from the UI.
+- Shadow mode setting, on by default.
+- Engine: unavailable loads and loads held by the global condition are left as they are, and their power is not reassigned.
+- Requires Home Assistant 2025.6 or later.
+
 ## 0.0.2
 
 - Engine: per-load switch-on and switch-off delays. The engine returns, per load, since when each condition holds (`on_since`, `off_since`); the caller stores the marks and passes them back. A delay not yet met yields the `on_delay` / `off_delay` reason.

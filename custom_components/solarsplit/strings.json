@@ -18,7 +18,8 @@
           "smoothing_window": "Smoothing window",
           "settle_time": "Settle time",
           "on_margin": "Switch-on margin",
-          "import_tolerance": "Import tolerance"
+          "import_tolerance": "Import tolerance",
+          "shadow_mode": "Shadow mode"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. Main signal of the loop.",
@@ -31,7 +32,8 @@
           "smoothing_window": "Moving average applied to the readings to filter clouds and spikes.",
           "settle_time": "Wait after a change before the next one.",
           "on_margin": "Extra power a load needs, above its own, to be switched on.",
-          "import_tolerance": "Grid import tolerated before a load is switched off."
+          "import_tolerance": "Grid import tolerated before a load is switched off.",
+          "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right."
         }
       }
     }
@@ -51,7 +53,8 @@
           "smoothing_window": "Smoothing window",
           "settle_time": "Settle time",
           "on_margin": "Switch-on margin",
-          "import_tolerance": "Import tolerance"
+          "import_tolerance": "Import tolerance",
+          "shadow_mode": "Shadow mode"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. Main signal of the loop.",
@@ -64,8 +67,112 @@
           "smoothing_window": "Moving average applied to the readings to filter clouds and spikes.",
           "settle_time": "Wait after a change before the next one.",
           "on_margin": "Extra power a load needs, above its own, to be switched on.",
-          "import_tolerance": "Grid import tolerated before a load is switched off."
+          "import_tolerance": "Grid import tolerated before a load is switched off.",
+          "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right."
         }
+      }
+    }
+  },
+  "config_subentries": {
+    "load": {
+      "entry_type": "Load",
+      "initiate_flow": {
+        "user": "Add load"
+      },
+      "step": {
+        "user": {
+          "title": "Add load",
+          "data": {
+            "name": "Name",
+            "entity_id": "Entity",
+            "nominal_power": "Nominal power",
+            "power_sensor": "Power sensor",
+            "priority": "Priority",
+            "no_skip": "Do not skip",
+            "on_delay": "Switch-on delay",
+            "off_delay": "Switch-off delay",
+            "min_on": "Minimum on time",
+            "min_off": "Minimum off time",
+            "respect_global_condition": "Respect the global condition",
+            "condition_entity": "Usage condition entity",
+            "condition_state": "Usage condition state",
+            "respect_manual": "Respect manual changes",
+            "hvac_mode": "Climate mode when on",
+            "variable_entity": "Regulated externally when"
+          },
+          "data_description": {
+            "name": "Shown on the load's device.",
+            "entity_id": "Switch, input boolean or climate entity that turns the load on and off.",
+            "nominal_power": "Power the load draws when on.",
+            "power_sensor": "Measured power of the load. When set, it is used instead of the nominal power.",
+            "priority": "1 is served first.",
+            "no_skip": "Only switch on when every eligible load before it is on.",
+            "on_delay": "The surplus must cover the load for this long before it is switched on.",
+            "off_delay": "The deficit must last this long before the load is switched off.",
+            "min_on": "Never switch off sooner after switching on. Protects compressors and pumps.",
+            "min_off": "Never switch on sooner after switching off.",
+            "respect_global_condition": "When the global condition is off, leave this load as it is.",
+            "condition_entity": "The load is only used while this entity has the state below.",
+            "condition_state": "State the usage condition entity must have, for example on.",
+            "respect_manual": "If someone else switches the load, stop controlling it until it returns to the state SolarSplit set.",
+            "hvac_mode": "Only for climate entities.",
+            "variable_entity": "While this entity is on (for example FreeDS master), the load is regulated elsewhere: SolarSplit never switches it, but its power counts."
+          }
+        },
+        "reconfigure": {
+          "title": "Edit load",
+          "data": {
+            "name": "Name",
+            "entity_id": "Entity",
+            "nominal_power": "Nominal power",
+            "power_sensor": "Power sensor",
+            "priority": "Priority",
+            "no_skip": "Do not skip",
+            "on_delay": "Switch-on delay",
+            "off_delay": "Switch-off delay",
+            "min_on": "Minimum on time",
+            "min_off": "Minimum off time",
+            "respect_global_condition": "Respect the global condition",
+            "condition_entity": "Usage condition entity",
+            "condition_state": "Usage condition state",
+            "respect_manual": "Respect manual changes",
+            "hvac_mode": "Climate mode when on",
+            "variable_entity": "Regulated externally when"
+          },
+          "data_description": {
+            "name": "Shown on the load's device.",
+            "entity_id": "Switch, input boolean or climate entity that turns the load on and off.",
+            "nominal_power": "Power the load draws when on.",
+            "power_sensor": "Measured power of the load. When set, it is used instead of the nominal power.",
+            "priority": "1 is served first.",
+            "no_skip": "Only switch on when every eligible load before it is on.",
+            "on_delay": "The surplus must cover the load for this long before it is switched on.",
+            "off_delay": "The deficit must last this long before the load is switched off.",
+            "min_on": "Never switch off sooner after switching on. Protects compressors and pumps.",
+            "min_off": "Never switch on sooner after switching off.",
+            "respect_global_condition": "When the global condition is off, leave this load as it is.",
+            "condition_entity": "The load is only used while this entity has the state below.",
+            "condition_state": "State the usage condition entity must have, for example on.",
+            "respect_manual": "If someone else switches the load, stop controlling it until it returns to the state SolarSplit set.",
+            "hvac_mode": "Only for climate entities.",
+            "variable_entity": "While this entity is on (for example FreeDS master), the load is regulated elsewhere: SolarSplit never switches it, but its power counts."
+          }
+        }
+      },
+      "error": {
+        "entity_in_use": "This entity already belongs to another load."
+      }
+    }
+  },
+  "selector": {
+    "hvac_mode": {
+      "options": {
+        "cool": "Cool",
+        "heat": "Heat",
+        "dry": "Dry",
+        "fan_only": "Fan only",
+        "heat_cool": "Heat/cool",
+        "auto": "Auto"
       }
     }
   }
