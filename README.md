@@ -62,19 +62,65 @@ Diagnostics (on the integration's menu) include the settings, every load and the
 
 ## Try it in shadow mode
 
-There are no releases yet; HACS installs the latest commit of `main` and shows its short hash as the version. Every new commit appears as an update.
+There are no releases yet: HACS installs the latest commit of `main` and shows its short hash as the version. Every new commit on `main` appears in HACS as an update. In shadow mode SolarSplit never calls a service on a load, so your current automations keep doing the real work while you compare.
 
-1. **Install.** HACS → ⋮ → *Custom repositories* → `https://github.com/jdgarcia99/ha-solarsplit`, type *Integration*. Download **SolarSplit** and restart Home Assistant.
-2. **Set up.** *Settings → Devices & services → Add integration → SolarSplit*. Choose the grid export and import sensors (for example `sensor.meter_export_to_grid` and the import sensor of the energy meter), the global condition (`input_boolean.casa_activada`) and, if you use it, the zero-injection entity. **Leave Shadow mode on.**
-3. **Add the loads** with **Add load**, one per device: real nominal power (or a power sensor), priority (1 first), delays and minimum times as your automations use them today, the usage condition (for example `input_boolean.climatizar_casa` for the air conditioners) and, for the water heater, *Regulated externally when* = the FreeDS master switch. Untick *Respect the global condition* for loads that must run with the house empty, such as the pool pump.
-4. **Watch for a week or two**, next to your current automations, which keep doing the real work:
-   - **Last decision**: in its history, every `turn_on` / `turn_off` with its `load` and `reason` attributes is what SolarSplit would have done. Compare it with what your automations did.
-   - **State** and **Reason** of each load: `waiting` means it wants a change and the reason says what holds it (`on_delay`, `min_on_time`, `settling`…); `blocked` with `no_budget` or `waiting_higher` explains why a load stays off.
-   - **Available budget** next to your export sensor in a history graph: it should follow the surplus without jumping with every cloud.
-   - **Diagnostics** (integration menu) when something looks wrong: settings, memory of every load and the last cycle.
-5. **Tune** delays, margins and priorities until the decisions match what you expect. Priority changes apply at once; other changes reload the integration without losing its memory.
+The UI follows Home Assistant's language; Spanish labels are given in brackets.
 
-When you are ready to hand over one load, turn **Manage** off on every other load, disable the automations of that load, and turn shadow mode off in the integration's settings. The master switch, or a load's **Manage** switch, gives control back to your automations at any time.
+### 1. Add the repository to HACS
+
+1. Open **HACS**, click **⋮** (top right) → **Custom repositories** (*Repositorios personalizados*).
+2. **Repository**: `https://github.com/jdgarcia99/ha-solarsplit` · **Type**: **Integration** (*Integración*) → **Add**. Close the dialog.
+3. Search HACS for **SolarSplit**, open it and click **Download** (*Descargar*). Keep the version it offers (the latest commit of `main`) and confirm.
+4. Restart Home Assistant: **Settings → System → ⏻ → Restart Home Assistant** (or the repair HACS raises).
+
+To update later, download the update HACS shows and restart again. The loop's memory survives restarts.
+
+### 2. Create the integration
+
+1. **Settings → Devices & services → Add integration**, search for **SolarSplit**.
+2. Fill in:
+   - **Grid export sensor**: power exported to the grid, in W (for example `sensor.meter_export_to_grid`).
+   - **Grid import sensor**: power imported from the grid, in W, from the same meter.
+   - **Global condition** (*Condición global*): `input_boolean.casa_activada`.
+   - **PV power sensor** and **Zero-injection mode entity**: optional. Zero-injection probing is not implemented yet; while that entity is on, the loop pauses and leaves every load alone.
+   - Keep the loop defaults (5 s cycle, 100 W safety margin, 30 s smoothing and settle time, 100 W switch-on margin, 150 W import tolerance).
+   - **Shadow mode** (*Modo sombra*): **leave it ticked**.
+3. Submit. A **SolarSplit** service device appears with the master switch and the loop sensors.
+
+### 3. Add each load
+
+On **Settings → Devices & services → SolarSplit**, click **Add load** (*Añadir carga*) once per device. An entity can belong to one load only, so a group of devices switched together needs one entity (a group or a template switch) or one load each.
+
+| Field | What to enter |
+| --- | --- |
+| **Name** | As you want to see it, e.g. *Depuradora*. |
+| **Entity** | The `switch`, `input_boolean` or `climate` entity that turns it on and off. |
+| **Nominal power** | What it really draws when on, in W. |
+| **Power sensor** | Its power meter, if it has one: used instead of the nominal power. |
+| **Priority** | 1 is served first. Give the water heater a high priority so FreeDS gets the surplus first. |
+| **Do not skip** (*No saltar*) | Tick on loads that may only start when every eligible load before them is on (today's rule for the air conditioners). |
+| **Switch-on / switch-off delay** | The delays your automations use today (`for:` of their triggers). |
+| **Minimum on / off time** | Protection for compressors and pumps; keep at least 5 min for air conditioners and the pool pump. |
+| **Respect the global condition** | Untick for loads that must keep running with the house empty, such as the pool pump. |
+| **Usage condition entity / state** | E.g. `input_boolean.climatizar_casa` / `on` for the air conditioners. |
+| **Respect manual changes** | Leave ticked. |
+| **Climate mode when on** | Only for `climate` entities (usually `cool`). |
+| **Regulated externally when** | For the water heater: the FreeDS master switch. While it is on, SolarSplit never switches the heater but counts its power. |
+
+Every load gets its own device with **Manage**, **State**, **Reason** and **Priority**. To change a load later, use its **⋮ → Reconfigure** on the integration page; the integration reloads without losing its memory. Priority can also be changed from its entity, at once.
+
+### 4. Watch it for a week or two
+
+- **Last decision**: its history shows every `turn_on` / `turn_off` SolarSplit would have done, with `load` and `reason` attributes. Compare it with what your automations did.
+- **State** and **Reason** of each load: `waiting` means it wants a change and the reason says what holds it (`on_delay`, `min_on_time`, `settling`…); `blocked` with `no_budget` or `waiting_higher` explains why a load stays off; `global_shutdown` means it would be switched off because the global condition is off.
+- **Available budget** next to your export sensor in a history graph: it should follow the surplus without jumping with every cloud.
+- **Diagnostics** (integration page → **⋮ → Download diagnostics**) when something looks wrong: settings, memory of every load and the last cycle.
+
+Tune delays, margins and priorities until the decisions match what you expect. Global settings are under the integration's **Configure** button.
+
+### 5. Hand over a load (later)
+
+Turn **Manage** off on every other load, disable the automations of the load you hand over, and untick **Shadow mode** in **Configure**. The master switch, or a load's **Manage** switch, gives control back to your automations at any time.
 
 ## Settings
 
@@ -86,7 +132,7 @@ All settings live in the UI; there is no YAML. They can be changed later from th
 | Grid import sensor | — | Power imported from the grid (W). Used to detect a deficit. |
 | PV power sensor | none | PV production (W). Needed for zero-injection mode. |
 | Zero-injection mode entity | none | When on, the loop probes loads instead of reading export. |
-| Global condition | none | When off, the loop leaves every load as it is. |
+| Global condition | none | When off, the loop switches off the loads it switched on that respect it, and leaves the rest as they are. |
 | Cycle interval | 5 s | How often the control loop runs. |
 | Safety margin | 100 W | Power never handed out to loads. |
 | Smoothing window | 30 s | Moving average applied to the readings. |
@@ -110,7 +156,7 @@ Each load is a subentry: on the integration's page, use **Add load**, and edit o
 | Switch-on delay | 60 s | The surplus must cover the load this long before it is switched on. |
 | Switch-off delay | 30 s | The deficit must last this long before the load is switched off. |
 | Minimum on / off time | 5 / 5 min | Protects compressors and pumps. |
-| Respect the global condition | on | When the global condition is off, leave this load as it is. |
+| Respect the global condition | on | When the global condition is off, switch this load off if SolarSplit switched it on (after its minimum on time); otherwise leave it as it is. |
 | Usage condition entity / state | none / `on` | The load is only used while that entity has that state. |
 | Respect manual changes | on | If someone else switches the load, stop controlling it until it returns to the state SolarSplit set. |
 | Climate mode when on | cool | For `climate` entities. |

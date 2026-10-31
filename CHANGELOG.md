@@ -12,7 +12,9 @@
 - Priority changes from the priority entity apply on the fly without reloading, and are stored in the load's subentry.
 - Global condition off: loads switched on by SolarSplit that respect the condition are switched off (reason `global_shutdown`, no off delay, minimum on time respected). Manual loads, loads that ignore the condition and the master switch behave as before. In shadow mode the decision is only published.
 - Every entity gets the label "Gestión de excedentes", created if missing.
-- README: how to try it in shadow mode.
+- README: step-by-step install from `main` through a HACS custom repository and load setup, to try it in shadow mode.
+- UI descriptions of the global condition and *Respect the global condition* explain the switch-off.
+- Validate workflow runs ruff over the whole repository.
 - Engine: unavailable loads and loads held by the global condition are left as they are, and their power is not reassigned.
 - Requires Home Assistant 2025.6 or later.
 
