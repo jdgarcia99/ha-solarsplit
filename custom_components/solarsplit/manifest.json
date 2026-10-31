@@ -1,0 +1,14 @@
+{
+  "domain": "solarsplit",
+  "name": "SolarSplit",
+  "codeowners": [
+    "@jdgarcia99"
+  ],
+  "config_flow": true,
+  "documentation": "https://github.com/jdgarcia99/ha-solarsplit",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/jdgarcia99/ha-solarsplit/issues",
+  "requirements": [],
+  "version": "0.0.1"
+}

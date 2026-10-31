@@ -1,0 +1,72 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "SolarSplit ya está configurado."
+    },
+    "step": {
+      "user": {
+        "title": "SolarSplit",
+        "description": "Elige los sensores de red y la configuración global del bucle de reparto de excedentes.",
+        "data": {
+          "export_sensor": "Sensor de exportación a red",
+          "import_sensor": "Sensor de importación de red",
+          "pv_sensor": "Sensor de potencia FV",
+          "zero_injection_entity": "Entidad de modo inyección cero",
+          "global_condition": "Condición global",
+          "cycle_interval": "Intervalo del ciclo",
+          "safety_margin": "Margen de seguridad",
+          "smoothing_window": "Ventana de suavizado",
+          "settle_time": "Tiempo de asentamiento",
+          "on_margin": "Margen de encendido",
+          "import_tolerance": "Tolerancia de importación"
+        },
+        "data_description": {
+          "export_sensor": "Potencia exportada a la red, en W. Señal principal del bucle.",
+          "import_sensor": "Potencia importada de la red, en W. Sirve para detectar déficit.",
+          "pv_sensor": "Producción FV, en W. Necesaria para el modo inyección cero.",
+          "zero_injection_entity": "Cuando está encendida, el inversor limita la exportación y el bucle pasa a sondear cargas.",
+          "global_condition": "Cuando está apagada, el bucle deja todas las cargas como estén.",
+          "cycle_interval": "Cada cuánto se ejecuta el bucle de control.",
+          "safety_margin": "Potencia que nunca se reparte entre las cargas.",
+          "smoothing_window": "Media móvil aplicada a las lecturas para filtrar nubes y picos.",
+          "settle_time": "Espera tras un cambio antes del siguiente.",
+          "on_margin": "Potencia extra, además de la suya, que necesita una carga para encenderse.",
+          "import_tolerance": "Importación de red tolerada antes de apagar una carga."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configuración de SolarSplit",
+        "data": {
+          "export_sensor": "Sensor de exportación a red",
+          "import_sensor": "Sensor de importación de red",
+          "pv_sensor": "Sensor de potencia FV",
+          "zero_injection_entity": "Entidad de modo inyección cero",
+          "global_condition": "Condición global",
+          "cycle_interval": "Intervalo del ciclo",
+          "safety_margin": "Margen de seguridad",
+          "smoothing_window": "Ventana de suavizado",
+          "settle_time": "Tiempo de asentamiento",
+          "on_margin": "Margen de encendido",
+          "import_tolerance": "Tolerancia de importación"
+        },
+        "data_description": {
+          "export_sensor": "Potencia exportada a la red, en W. Señal principal del bucle.",
+          "import_sensor": "Potencia importada de la red, en W. Sirve para detectar déficit.",
+          "pv_sensor": "Producción FV, en W. Necesaria para el modo inyección cero.",
+          "zero_injection_entity": "Cuando está encendida, el inversor limita la exportación y el bucle pasa a sondear cargas.",
+          "global_condition": "Cuando está apagada, el bucle deja todas las cargas como estén.",
+          "cycle_interval": "Cada cuánto se ejecuta el bucle de control.",
+          "safety_margin": "Potencia que nunca se reparte entre las cargas.",
+          "smoothing_window": "Media móvil aplicada a las lecturas para filtrar nubes y picos.",
+          "settle_time": "Espera tras un cambio antes del siguiente.",
+          "on_margin": "Potencia extra, además de la suya, que necesita una carga para encenderse.",
+          "import_tolerance": "Importación de red tolerada antes de apagar una carga."
+        }
+      }
+    }
+  }
+}

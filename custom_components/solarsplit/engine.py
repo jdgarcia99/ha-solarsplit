@@ -1,0 +1,193 @@
+"""Control engine: a pure function from measurements and load states to one decision.
+
+It has no Home Assistant imports, so it can be tested, and replayed over real
+days, with plain pytest. Times are seconds on any monotonic clock.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+
+
+class LoadKind(StrEnum):
+    """How the engine treats a load."""
+
+    RELAY = "relay"  # switched on and off by the engine
+    VARIABLE = "variable"  # regulated elsewhere (FreeDS); only its consumption counts
+
+
+class Action(StrEnum):
+    """What the engine asks for in a cycle."""
+
+    NONE = "none"
+    TURN_ON = "turn_on"
+    TURN_OFF = "turn_off"
+
+
+class Reason(StrEnum):
+    """Why a load is in its desired state, or why the cycle did nothing.
+
+    Codes, not text: the UI translates them.
+    """
+
+    PAUSED = "paused"
+    SETTLING = "settling"
+    STEADY = "steady"
+    FITS = "fits"
+    NO_BUDGET = "no_budget"
+    WAITING_HIGHER = "waiting_higher"
+    NOT_ELIGIBLE = "not_eligible"
+    MIN_ON_TIME = "min_on_time"
+    MIN_OFF_TIME = "min_off_time"
+    MANUAL = "manual"
+    UNMANAGED = "unmanaged"
+    VARIABLE = "variable"
+
+
+@dataclass(frozen=True)
+class Measurements:
+    """Smoothed grid readings, in W. Both are positive or zero."""
+
+    export_w: float
+    import_w: float
+
+
+@dataclass(frozen=True)
+class EngineConfig:
+    """Global tuning of the engine."""
+
+    safety_margin: float = 100  # W
+    on_margin: float = 100  # W, extra budget needed to switch a load on
+    import_tolerance: float = 150  # W, deficit tolerated before switching a load off
+    settle_time: float = 30  # s
+
+
+@dataclass(frozen=True)
+class LoadState:
+    """A load as the engine sees it in one cycle."""
+
+    id: str
+    priority: int  # 1 = first
+    nominal_w: float
+    is_on: bool
+    actual_w: float | None = None
+    kind: LoadKind = LoadKind.RELAY
+    managed: bool = True
+    manual: bool = False
+    eligible: bool = True  # usage condition and, if it applies, the global condition hold
+    no_skip: bool = False  # only enters when every eligible load before it is on
+    min_on: float = 0  # s
+    min_off: float = 0  # s
+    last_change: float | None = None  # time of the last on/off transition
+
+    @property
+    def consumption(self) -> float:
+        """Power drawn now: measured if possible, else nominal while on."""
+        if self.actual_w is not None:
+            return max(self.actual_w, 0.0)
+        if self.kind is LoadKind.VARIABLE:
+            return 0.0
+        return self.nominal_w if self.is_on else 0.0
+
+    @property
+    def controlled(self) -> bool:
+        """Whether the engine owns this load's power."""
+        return self.managed and not self.manual
+
+
+@dataclass(frozen=True)
+class Decision:
+    """Outcome of one cycle: at most one action, plus the reason for every load."""
+
+    budget: float
+    action: Action = Action.NONE
+    load_id: str | None = None
+    reason: Reason = Reason.STEADY
+    desired: dict[str, bool] = field(default_factory=dict)
+    reasons: dict[str, Reason] = field(default_factory=dict)
+
+
+def compute_budget(meas: Measurements, loads: list[LoadState], cfg: EngineConfig) -> float:
+    """Power available to hand out, counting what controlled loads already use."""
+    assigned = sum(load.consumption for load in loads if load.controlled)
+    return meas.export_w - meas.import_w + assigned - cfg.safety_margin
+
+
+def decide(
+    now: float,
+    meas: Measurements,
+    loads: list[LoadState],
+    cfg: EngineConfig,
+    last_action: float | None = None,
+    active: bool = True,
+) -> Decision:
+    """Run one control cycle."""
+    budget = compute_budget(meas, loads, cfg)
+    if not active:
+        return Decision(budget, reason=Reason.PAUSED)
+
+    desired: dict[str, bool] = {}
+    reasons: dict[str, Reason] = {}
+    remaining = budget
+    gap = False  # an eligible relay load before this one was left off
+
+    for load in sorted(loads, key=lambda load: (load.priority, load.id)):
+        if not load.managed:
+            reasons[load.id] = Reason.UNMANAGED
+            continue
+        if load.manual:
+            reasons[load.id] = Reason.MANUAL
+            continue
+        if load.kind is LoadKind.VARIABLE:
+            remaining -= load.consumption
+            reasons[load.id] = Reason.VARIABLE
+            continue
+        if not load.eligible:
+            desired[load.id] = False
+            reasons[load.id] = Reason.NOT_ELIGIBLE
+            continue
+        if gap and load.no_skip:
+            desired[load.id] = False
+            reasons[load.id] = Reason.WAITING_HIGHER
+            continue
+        if load.is_on:
+            power = load.consumption
+            fits = remaining + cfg.import_tolerance >= power
+        else:
+            power = load.nominal_w
+            fits = remaining >= power + cfg.on_margin
+        desired[load.id] = fits
+        if fits:
+            remaining -= power
+            reasons[load.id] = Reason.FITS
+        else:
+            reasons[load.id] = Reason.NO_BUDGET
+            gap = True
+
+    by_id = {load.id: load for load in loads}
+    offs = sorted(
+        (by_id[i] for i, on in desired.items() if not on and by_id[i].is_on),
+        key=lambda load: (-load.priority, load.id),
+    )
+    ons = sorted(
+        (by_id[i] for i, on in desired.items() if on and not by_id[i].is_on),
+        key=lambda load: (load.priority, load.id),
+    )
+    if not offs and not ons:
+        return Decision(budget, desired=desired, reasons=reasons)
+    if last_action is not None and now - last_action < cfg.settle_time:
+        return Decision(budget, reason=Reason.SETTLING, desired=desired, reasons=reasons)
+
+    # Switch-offs first; never switch on while a needed switch-off is blocked.
+    action = Action.TURN_OFF if offs else Action.TURN_ON
+    for load in offs or ons:
+        since = float("inf") if load.last_change is None else now - load.last_change
+        if action is Action.TURN_OFF and since < load.min_on:
+            reasons[load.id] = Reason.MIN_ON_TIME
+            continue
+        if action is Action.TURN_ON and since < load.min_off:
+            reasons[load.id] = Reason.MIN_OFF_TIME
+            continue
+        return Decision(budget, action, load.id, reasons[load.id], desired, reasons)
+    return Decision(budget, desired=desired, reasons=reasons)

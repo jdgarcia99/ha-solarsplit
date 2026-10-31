@@ -1,0 +1,72 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "SolarSplit is already set up."
+    },
+    "step": {
+      "user": {
+        "title": "SolarSplit",
+        "description": "Choose the grid sensors and the global settings of the surplus control loop.",
+        "data": {
+          "export_sensor": "Grid export sensor",
+          "import_sensor": "Grid import sensor",
+          "pv_sensor": "PV power sensor",
+          "zero_injection_entity": "Zero-injection mode entity",
+          "global_condition": "Global condition",
+          "cycle_interval": "Cycle interval",
+          "safety_margin": "Safety margin",
+          "smoothing_window": "Smoothing window",
+          "settle_time": "Settle time",
+          "on_margin": "Switch-on margin",
+          "import_tolerance": "Import tolerance"
+        },
+        "data_description": {
+          "export_sensor": "Power exported to the grid, in W. Main signal of the loop.",
+          "import_sensor": "Power imported from the grid, in W. Used to detect a deficit.",
+          "pv_sensor": "PV production, in W. Needed for zero-injection mode.",
+          "zero_injection_entity": "When this entity is on, the inverter limits export and the loop probes loads instead.",
+          "global_condition": "When this entity is off, the loop leaves every load as it is.",
+          "cycle_interval": "How often the control loop runs.",
+          "safety_margin": "Power never handed out to loads.",
+          "smoothing_window": "Moving average applied to the readings to filter clouds and spikes.",
+          "settle_time": "Wait after a change before the next one.",
+          "on_margin": "Extra power a load needs, above its own, to be switched on.",
+          "import_tolerance": "Grid import tolerated before a load is switched off."
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "SolarSplit settings",
+        "data": {
+          "export_sensor": "Grid export sensor",
+          "import_sensor": "Grid import sensor",
+          "pv_sensor": "PV power sensor",
+          "zero_injection_entity": "Zero-injection mode entity",
+          "global_condition": "Global condition",
+          "cycle_interval": "Cycle interval",
+          "safety_margin": "Safety margin",
+          "smoothing_window": "Smoothing window",
+          "settle_time": "Settle time",
+          "on_margin": "Switch-on margin",
+          "import_tolerance": "Import tolerance"
+        },
+        "data_description": {
+          "export_sensor": "Power exported to the grid, in W. Main signal of the loop.",
+          "import_sensor": "Power imported from the grid, in W. Used to detect a deficit.",
+          "pv_sensor": "PV production, in W. Needed for zero-injection mode.",
+          "zero_injection_entity": "When this entity is on, the inverter limits export and the loop probes loads instead.",
+          "global_condition": "When this entity is off, the loop leaves every load as it is.",
+          "cycle_interval": "How often the control loop runs.",
+          "safety_margin": "Power never handed out to loads.",
+          "smoothing_window": "Moving average applied to the readings to filter clouds and spikes.",
+          "settle_time": "Wait after a change before the next one.",
+          "on_margin": "Extra power a load needs, above its own, to be switched on.",
+          "import_tolerance": "Grid import tolerated before a load is switched off."
+        }
+      }
+    }
+  }
+}
