@@ -5,7 +5,7 @@
 
 SolarSplit is a Home Assistant integration that shares your PV surplus among loads ordered by priority (pool pump, water heater, air conditioners, radiators…). One control loop replaces the usual pairs of on/off automations: every cycle it works out how much power is available, decides which loads should run, and makes at most one change, with hysteresis and minimum on/off times.
 
-> **Status: early development.** The control engine and the global configuration are in place; loads, entities and the control loop are not yet. See the [design document](docs/design.md) (in Spanish) and the [changelog](CHANGELOG.md).
+> **Status: early development.** The control loop runs in **shadow mode**: it decides and publishes what it would do, without switching any load. Zero-injection probing, hourly net balance, services and per-load daily targets are not implemented yet. See the [design document](docs/design.md) (in Spanish) and the [changelog](CHANGELOG.md).
 
 ## How it works
 
@@ -17,7 +17,36 @@ budget = export − import + power of the managed loads that are on − safety m
 
 Power already used by managed loads is added back, because it can be reassigned. Loads are then walked in priority order: each one enters if it fits in what is left of the budget. The engine compares the desired and the real states and makes a single change: switch-offs first (lowest priority first), then switch-ons (highest priority first), always respecting the settle time and each load's minimum on and off times.
 
-Planned on top of that: zero-injection mode (probing loads when the inverter limits export), hourly net balance mode, variable loads regulated elsewhere (FreeDS), manual override detection, and status and reason entities for every load.
+A load only switches on after the surplus has covered it for its switch-on delay, and only switches off after the deficit has lasted its switch-off delay. Loads regulated elsewhere (FreeDS) are never switched but their power counts. If someone else switches a load, SolarSplit stops controlling it until it returns to the state SolarSplit set.
+
+### Shadow mode
+
+Shadow mode is **on by default**. The loop runs every cycle and updates all its entities, but never calls a service on a load. Compare its decisions with your current automations for a while, then turn shadow mode off in the integration's settings. Turning a load's **Manage** switch off, or the master switch off, hands the load back to your automations at any time.
+
+Planned: zero-injection mode (probing loads when the inverter limits export), hourly net balance mode, `force_on` / `force_off` / `recalculate` services, and daily targets per load.
+
+## Entities
+
+The **SolarSplit** device:
+
+| Entity | Description |
+| --- | --- |
+| Surplus management (switch) | Master switch. Off: the loop leaves every load as it is. |
+| Available budget (sensor, W) | Budget of the last cycle. |
+| Assigned power (sensor, W) | Power of the managed loads that are on. |
+| Mode (sensor) | `normal`, `zero_injection` or `paused`. |
+| Last decision (sensor) | `none`, `turn_on` or `turn_off`; attributes `load`, `reason`, `budget` and `shadow` (true if it was only simulated). |
+
+One device per load:
+
+| Entity | Description |
+| --- | --- |
+| Manage (switch) | Include or exclude the load without deleting it. |
+| State (sensor) | `on`, `off`, `waiting` (a change is wanted), `blocked`, `manual`, `unmanaged` or `unavailable`. |
+| Reason (sensor) | Why, for example `no_budget`, `on_delay`, `min_on_time` or `not_eligible`. |
+| Priority (number) | Editable on the fly; stored in the load's settings. |
+
+Diagnostics (on the integration's menu) include the settings, every load and the last cycle.
 
 ## Installation
 

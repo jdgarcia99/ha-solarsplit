@@ -3,7 +3,11 @@
 ## 0.1.0 (unreleased)
 
 - Loads as config subentries: add, edit and delete each load from the UI.
-- Shadow mode setting, on by default.
+- Control loop (coordinator): reads the grid sensors, smooths them, builds every load's state, stores the engine's delay marks and, outside shadow mode, switches the chosen load (`switch`, `input_boolean` or `climate`).
+- Shadow mode setting, on by default: the loop decides and publishes without switching anything.
+- Entities: master switch, available budget, assigned power, mode and last decision; per load, a managed switch, state and reason sensors and a priority number.
+- Manual changes: a load switched by someone else is left alone until it returns to the state SolarSplit set, or its Manage switch is turned on again.
+- Diagnostics with the settings, the loads and the last cycle.
 - Engine: unavailable loads and loads held by the global condition are left as they are, and their power is not reassigned.
 - Requires Home Assistant 2025.6 or later.
 

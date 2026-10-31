@@ -154,6 +154,18 @@ Todas con la etiqueta «Gestión de excedentes» y agrupadas en un dispositivo g
 
 El atributo de diagnóstico de cada ciclo (presupuesto, cargas evaluadas, decisión) va a los diagnósticos descargables de la integración, para suplir las trazas de las automatizaciones.
 
+### Decisiones de implementación (0.1.0)
+
+- **Modo sombra** es un ajuste global (Opciones), **activado por defecto**: el bucle calcula y publica todo, pero nunca llama a un servicio sobre una carga. Así una instalación nueva no actúa hasta que se desactiva a propósito.
+- **Última decisión** es un sensor enum (`none`, `turn_on`, `turn_off`) con atributos `load`, `reason`, `budget` y `shadow`, en lugar de un texto libre: así se traduce en la UI y se puede usar en automatizaciones y gráficas.
+- **Motivo** es un sensor enum con los códigos del motor (`no_budget`, `on_delay`, `min_on_time`…), traducidos.
+- **Condición global y cargas que la ignoran.** Con la condición global apagada, las cargas que la respetan quedan fuera del reparto tal como estén (motivo `global_condition`) y su consumo no se reasigna; las que la ignoran (depuradora) siguen gestionándose.
+- **Cargas no disponibles** (entidad `unavailable`/`unknown`) se tratan igual: se dejan como estén.
+- **Control manual.** El coordinador recuerda el último estado que ordenó (`commanded`). Si la carga está en otro estado, es «manual» hasta que vuelva a ese estado o se reactive su interruptor Gestionar, que adopta el estado actual.
+- **Prioridad** (number) se guarda en la subentrada de la carga, así que cambiarla recarga la integración.
+- **Termo con FreeDS:** la carga tiene un campo «Regulada externamente cuando» (`freeds_maestro`). Con esa entidad encendida es una carga variable; apagada, un relé normal.
+- **Pendiente:** sondeo en inyección cero (el modo se detecta y el motor queda en pausa), balance neto horario, servicios, objetivo diario y condiciones por plantilla, sensor de tiempo encendida hoy, y poner la etiqueta «Gestión de excedentes» a las entidades.
+
 ## Casos especiales
 
 **Termo y FreeDS.** Con `freeds_maestro` encendido, FreeDS regula el termo de forma proporcional y la integración no debe tocarlo. El termo se declara como **carga variable**: no se enciende ni apaga, pero su consumo real cuenta en el presupuesto. Las cargas de menor prioridad solo reciben lo que FreeDS no esté usando, y conviene darle al termo una prioridad alta para que FreeDS se quede el excedente primero. Con `freeds_maestro` apagado, el termo pasa a ser una carga de relé normal con su umbral.
