@@ -175,5 +175,77 @@
         "auto": "Auto"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "budget": {
+        "name": "Available budget"
+      },
+      "assigned_power": {
+        "name": "Assigned power"
+      },
+      "mode": {
+        "name": "Mode",
+        "state": {
+          "normal": "Normal",
+          "zero_injection": "Zero injection",
+          "paused": "Paused"
+        }
+      },
+      "last_decision": {
+        "name": "Last decision",
+        "state": {
+          "none": "None",
+          "turn_on": "Switch on",
+          "turn_off": "Switch off"
+        }
+      },
+      "load_state": {
+        "name": "State",
+        "state": {
+          "on": "On",
+          "off": "Off",
+          "waiting": "Waiting",
+          "blocked": "Blocked",
+          "manual": "Manual",
+          "unmanaged": "Not managed",
+          "unavailable": "Unavailable"
+        }
+      },
+      "load_reason": {
+        "name": "Reason",
+        "state": {
+          "paused": "Paused",
+          "settling": "Waiting for the last change to settle",
+          "steady": "No change needed",
+          "fits": "Fits in the surplus",
+          "no_budget": "Not enough surplus",
+          "waiting_higher": "Waiting for higher priority loads",
+          "not_eligible": "Usage condition not met",
+          "min_on_time": "Minimum on time",
+          "min_off_time": "Minimum off time",
+          "on_delay": "Switch-on delay",
+          "off_delay": "Switch-off delay",
+          "manual": "Changed manually",
+          "unmanaged": "Not managed",
+          "unavailable": "Unavailable",
+          "global_condition": "Global condition off",
+          "variable": "Regulated externally"
+        }
+      }
+    },
+    "switch": {
+      "active": {
+        "name": "Surplus management"
+      },
+      "managed": {
+        "name": "Manage"
+      }
+    },
+    "number": {
+      "priority": {
+        "name": "Priority"
+      }
+    }
   }
 }

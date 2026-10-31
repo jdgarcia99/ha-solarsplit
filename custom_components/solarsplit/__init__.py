@@ -2,103 +2,35 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import (
-    CONF_CONDITION_ENTITY,
-    CONF_CONDITION_STATE,
-    CONF_CYCLE_INTERVAL,
-    CONF_GLOBAL_CONDITION,
-    CONF_HVAC_MODE,
-    CONF_IMPORT_TOLERANCE,
-    CONF_MIN_OFF,
-    CONF_MIN_ON,
-    CONF_NO_SKIP,
-    CONF_OFF_DELAY,
-    CONF_ON_DELAY,
-    CONF_ON_MARGIN,
-    CONF_POWER_SENSOR,
-    CONF_PRIORITY,
-    CONF_PV_SENSOR,
-    CONF_RESPECT_GLOBAL,
-    CONF_RESPECT_MANUAL,
-    CONF_SAFETY_MARGIN,
-    CONF_SETTLE_TIME,
-    CONF_SHADOW_MODE,
-    CONF_SMOOTHING_WINDOW,
-    CONF_VARIABLE_ENTITY,
-    CONF_ZERO_INJECTION_ENTITY,
-    DEFAULT_CONDITION_STATE,
-    DEFAULT_CYCLE_INTERVAL,
-    DEFAULT_HVAC_MODE,
-    DEFAULT_IMPORT_TOLERANCE,
-    DEFAULT_MIN_OFF,
-    DEFAULT_MIN_ON,
-    DEFAULT_OFF_DELAY,
-    DEFAULT_ON_DELAY,
-    DEFAULT_ON_MARGIN,
-    DEFAULT_PRIORITY,
-    DEFAULT_SAFETY_MARGIN,
-    DEFAULT_SETTLE_TIME,
-    DEFAULT_SHADOW_MODE,
-    DEFAULT_SMOOTHING_WINDOW,
-)
+from .coordinator import SolarSplitCoordinator
+from .settings import DEFAULTS, LOAD_DEFAULTS, get_settings, load_settings
 
-DEFAULTS: dict[str, Any] = {
-    CONF_PV_SENSOR: None,
-    CONF_ZERO_INJECTION_ENTITY: None,
-    CONF_GLOBAL_CONDITION: None,
-    CONF_SHADOW_MODE: DEFAULT_SHADOW_MODE,
-    CONF_CYCLE_INTERVAL: DEFAULT_CYCLE_INTERVAL,
-    CONF_SAFETY_MARGIN: DEFAULT_SAFETY_MARGIN,
-    CONF_SMOOTHING_WINDOW: DEFAULT_SMOOTHING_WINDOW,
-    CONF_SETTLE_TIME: DEFAULT_SETTLE_TIME,
-    CONF_ON_MARGIN: DEFAULT_ON_MARGIN,
-    CONF_IMPORT_TOLERANCE: DEFAULT_IMPORT_TOLERANCE,
-}
+__all__ = ["DEFAULTS", "LOAD_DEFAULTS", "get_settings", "load_settings"]
+
+PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
+
+type SolarSplitConfigEntry = ConfigEntry[SolarSplitCoordinator]
 
 
-LOAD_DEFAULTS: dict[str, Any] = {
-    CONF_POWER_SENSOR: None,
-    CONF_PRIORITY: DEFAULT_PRIORITY,
-    CONF_NO_SKIP: False,
-    CONF_ON_DELAY: DEFAULT_ON_DELAY,
-    CONF_OFF_DELAY: DEFAULT_OFF_DELAY,
-    CONF_MIN_ON: DEFAULT_MIN_ON,
-    CONF_MIN_OFF: DEFAULT_MIN_OFF,
-    CONF_RESPECT_GLOBAL: True,
-    CONF_CONDITION_ENTITY: None,
-    CONF_CONDITION_STATE: DEFAULT_CONDITION_STATE,
-    CONF_RESPECT_MANUAL: True,
-    CONF_HVAC_MODE: DEFAULT_HVAC_MODE,
-    CONF_VARIABLE_ENTITY: None,
-}
-
-
-def get_settings(entry: ConfigEntry) -> dict[str, Any]:
-    """Effective settings: defaults, then entry data, then options."""
-    return {**DEFAULTS, **entry.data, **entry.options}
-
-
-def load_settings(subentry: ConfigSubentry) -> dict[str, Any]:
-    """Effective settings of a load: defaults, then subentry data."""
-    return {**LOAD_DEFAULTS, **subentry.data}
-
-
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: SolarSplitConfigEntry) -> bool:
     """Set up SolarSplit from a config entry."""
+    coordinator = SolarSplitCoordinator(hass, entry)
+    await coordinator.async_config_entry_first_refresh()
+    entry.runtime_data = coordinator
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_reload))
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: SolarSplitConfigEntry) -> bool:
     """Unload a config entry."""
-    return True
+    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-async def _async_reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the entry when its options change."""
+async def _async_reload(hass: HomeAssistant, entry: SolarSplitConfigEntry) -> None:
+    """Reload the entry when its options or loads change."""
     await hass.config_entries.async_reload(entry.entry_id)

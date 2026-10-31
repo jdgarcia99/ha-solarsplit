@@ -175,5 +175,77 @@
         "auto": "Automático"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "budget": {
+        "name": "Presupuesto disponible"
+      },
+      "assigned_power": {
+        "name": "Potencia asignada"
+      },
+      "mode": {
+        "name": "Modo",
+        "state": {
+          "normal": "Normal",
+          "zero_injection": "Inyección cero",
+          "paused": "En pausa"
+        }
+      },
+      "last_decision": {
+        "name": "Última decisión",
+        "state": {
+          "none": "Ninguna",
+          "turn_on": "Encender",
+          "turn_off": "Apagar"
+        }
+      },
+      "load_state": {
+        "name": "Estado",
+        "state": {
+          "on": "Encendida",
+          "off": "Apagada",
+          "waiting": "Esperando",
+          "blocked": "Bloqueada",
+          "manual": "Manual",
+          "unmanaged": "No gestionada",
+          "unavailable": "No disponible"
+        }
+      },
+      "load_reason": {
+        "name": "Motivo",
+        "state": {
+          "paused": "En pausa",
+          "settling": "Esperando a que se asiente el último cambio",
+          "steady": "Sin cambios",
+          "fits": "Cabe en el excedente",
+          "no_budget": "Excedente insuficiente",
+          "waiting_higher": "Esperando a cargas de más prioridad",
+          "not_eligible": "Condición de uso no cumplida",
+          "min_on_time": "Tiempo mínimo encendida",
+          "min_off_time": "Tiempo mínimo apagada",
+          "on_delay": "Retardo de encendido",
+          "off_delay": "Retardo de apagado",
+          "manual": "Cambiada a mano",
+          "unmanaged": "No gestionada",
+          "unavailable": "No disponible",
+          "global_condition": "Condición global apagada",
+          "variable": "Regulada externamente"
+        }
+      }
+    },
+    "switch": {
+      "active": {
+        "name": "Gestión de excedentes"
+      },
+      "managed": {
+        "name": "Gestionar"
+      }
+    },
+    "number": {
+      "priority": {
+        "name": "Prioridad"
+      }
+    }
   }
 }

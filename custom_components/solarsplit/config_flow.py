@@ -17,7 +17,6 @@ from homeassistant.const import CONF_NAME, UnitOfPower, UnitOfTime
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
-from . import DEFAULTS, LOAD_DEFAULTS, get_settings
 from .const import (
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
@@ -53,6 +52,7 @@ from .const import (
     MIN_CYCLE_INTERVAL,
     SUBENTRY_LOAD,
 )
+from .settings import DEFAULTS, LOAD_DEFAULTS, get_settings
 
 POWER_SENSOR = selector.EntitySelector(
     selector.EntitySelectorConfig(domain="sensor", device_class="power")
