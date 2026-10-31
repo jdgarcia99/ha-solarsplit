@@ -46,6 +46,7 @@ class Reason(StrEnum):
     UNMANAGED = "unmanaged"
     UNAVAILABLE = "unavailable"
     GLOBAL_CONDITION = "global_condition"
+    GLOBAL_SHUTDOWN = "global_shutdown"
     VARIABLE = "variable"
 
 
@@ -80,6 +81,7 @@ class LoadState:
     managed: bool = True
     available: bool = True  # its entity reports a usable state
     manual: bool = False
+    owned: bool = False  # SolarSplit switched it on (in shadow mode: assumed for loads that are on)
     global_ok: bool = True  # the global condition holds, or this load ignores it
     eligible: bool = True  # its usage condition holds
     no_skip: bool = False  # only enters when every eligible load before it is on
@@ -108,8 +110,14 @@ class LoadState:
         """Whether the engine owns this load's power.
 
         Loads it does not own are left as they are, and their power is not reassigned.
+        A load it switched on stays its own when the global condition fails, to switch it off.
         """
-        return self.managed and self.available and not self.manual and self.global_ok
+        return self.managed and self.available and not self.manual and (self.global_ok or self.shutdown)
+
+    @property
+    def shutdown(self) -> bool:
+        """Whether the global condition failing means switching this load off."""
+        return not self.global_ok and self.owned and self.is_on and self.kind is LoadKind.RELAY
 
 
 @dataclass(frozen=True)
@@ -164,6 +172,10 @@ def decide(
             continue
         if load.manual:
             reasons[load.id] = Reason.MANUAL
+            continue
+        if load.shutdown:
+            desired[load.id] = False
+            reasons[load.id] = Reason.GLOBAL_SHUTDOWN
             continue
         if not load.global_ok:
             reasons[load.id] = Reason.GLOBAL_CONDITION
@@ -224,7 +236,9 @@ def decide(
             if since < load.min_on:
                 reasons[load.id] = Reason.MIN_ON_TIME
                 continue
-            if now - off_since[load.id] < load.off_delay:
+            # A global shutdown is deliberate, not a passing cloud: no off delay,
+            # but the minimum on time still protects compressors and pumps.
+            if not load.shutdown and now - off_since[load.id] < load.off_delay:
                 reasons[load.id] = Reason.OFF_DELAY
                 continue
         else:

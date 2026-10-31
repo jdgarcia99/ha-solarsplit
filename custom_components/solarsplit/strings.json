@@ -230,7 +230,8 @@
           "unmanaged": "Not managed",
           "unavailable": "Unavailable",
           "global_condition": "Global condition off",
-          "variable": "Regulated externally"
+          "variable": "Regulated externally",
+          "global_shutdown": "Global condition off: switching off"
         }
       }
     },

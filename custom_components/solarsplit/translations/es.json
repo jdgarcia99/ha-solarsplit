@@ -230,7 +230,8 @@
           "unmanaged": "No gestionada",
           "unavailable": "No disponible",
           "global_condition": "Condición global apagada",
-          "variable": "Regulada externamente"
+          "variable": "Regulada externamente",
+          "global_shutdown": "Condición global apagada: se apaga"
         }
       }
     },

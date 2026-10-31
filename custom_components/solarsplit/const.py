@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 DOMAIN = "solarsplit"
+LABEL_NAME = "Gestión de excedentes"  # given to every entity, created if missing
 
 CONF_EXPORT_SENSOR = "export_sensor"
 CONF_IMPORT_SENSOR = "import_sensor"

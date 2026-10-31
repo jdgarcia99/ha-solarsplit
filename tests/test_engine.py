@@ -118,6 +118,31 @@ def test_global_condition_and_unavailable_leave_loads_as_they_are() -> None:
     assert d.budget == -500 and d.action is Action.NONE
 
 
+def test_global_shutdown_switches_off_owned_loads_only() -> None:
+    loads = [
+        pool(is_on=True, owned=True, global_ok=False, off_delay=300),  # ours: off, without waiting
+        ac(is_on=True, owned=False, global_ok=False),  # switched on by someone else: untouched
+        heater(is_on=True, owned=True, global_ok=False, manual=True),  # manual: untouched
+    ]
+    d = decide(NOW, Measurements(5000, 0), loads, CFG)
+    assert d.reasons == {
+        "pool": Reason.GLOBAL_SHUTDOWN, "ac": Reason.GLOBAL_CONDITION, "heater": Reason.MANUAL,
+    }
+    assert (d.action, d.load_id, d.reason) == (Action.TURN_OFF, "pool", Reason.GLOBAL_SHUTDOWN)
+
+
+def test_global_shutdown_respects_min_on_time() -> None:
+    load = pool(is_on=True, owned=True, global_ok=False, min_on=900, last_change=NOW - 60)
+    d = decide(NOW, Measurements(5000, 0), [load], CFG)
+    assert d.action is Action.NONE and d.reasons["pool"] is Reason.MIN_ON_TIME
+
+
+def test_global_shutdown_skips_variable_loads() -> None:
+    load = heater(is_on=True, owned=True, global_ok=False, kind=LoadKind.VARIABLE, actual_w=800)
+    d = decide(NOW, Measurements(0, 0), [load], CFG)
+    assert d.reasons["heater"] is Reason.GLOBAL_CONDITION and d.action is Action.NONE
+
+
 def cycle(now: float, meas: Measurements, load: LoadState) -> tuple[Decision, LoadState]:
     """Run one cycle and store the marks back, as the coordinator does."""
     d = decide(now, meas, [load], CFG)

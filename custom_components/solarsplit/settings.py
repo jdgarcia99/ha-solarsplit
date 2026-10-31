@@ -85,3 +85,12 @@ def get_settings(entry: ConfigEntry) -> dict[str, Any]:
 def load_settings(subentry: ConfigSubentry) -> dict[str, Any]:
     """Effective settings of a load: defaults, then subentry data."""
     return {**LOAD_DEFAULTS, **subentry.data}
+
+
+def config_snapshot(entry: ConfigEntry) -> tuple[dict[str, Any], dict[str, Any], dict[str, tuple[str, dict[str, Any]]]]:
+    """Everything a reload would pick up: data, options and loads."""
+    return (
+        dict(entry.data),
+        dict(entry.options),
+        {sid: (sub.title, dict(sub.data)) for sid, sub in entry.subentries.items()},
+    )

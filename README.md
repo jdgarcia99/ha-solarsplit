@@ -19,6 +19,12 @@ Power already used by managed loads is added back, because it can be reassigned.
 
 A load only switches on after the surplus has covered it for its switch-on delay, and only switches off after the deficit has lasted its switch-off delay. Loads regulated elsewhere (FreeDS) are never switched but their power counts. If someone else switches a load, SolarSplit stops controlling it until it returns to the state SolarSplit set.
 
+When the global condition goes off, SolarSplit switches off the loads it switched on itself and that respect the condition (respecting their minimum on time); loads switched by hand and loads that ignore the condition are left alone. Turning the master switch off, instead, leaves every load as it is.
+
+The loop's memory (what it switched, the time of each load's last change and the delay marks) is saved, so a reload or a restart of Home Assistant does not turn its loads into manual ones. A load changed while Home Assistant was stopped is detected as manual. Delay marks older than two minutes are dropped on restart.
+
+All SolarSplit entities get the label **Gestión de excedentes**, created if it does not exist.
+
 ### Shadow mode
 
 Shadow mode is **on by default**. The loop runs every cycle and updates all its entities, but never calls a service on a load. Compare its decisions with your current automations for a while, then turn shadow mode off in the integration's settings. Turning a load's **Manage** switch off, or the master switch off, hands the load back to your automations at any time.
@@ -44,7 +50,7 @@ One device per load:
 | Manage (switch) | Include or exclude the load without deleting it. |
 | State (sensor) | `on`, `off`, `waiting` (a change is wanted), `blocked`, `manual`, `unmanaged` or `unavailable`. |
 | Reason (sensor) | Why, for example `no_budget`, `on_delay`, `min_on_time` or `not_eligible`. |
-| Priority (number) | Editable on the fly; stored in the load's settings. |
+| Priority (number) | Applied on the fly, without reloading; also stored in the load's settings. |
 
 Diagnostics (on the integration's menu) include the settings, every load and the last cycle.
 
@@ -53,6 +59,22 @@ Diagnostics (on the integration's menu) include the settings, every load and the
 1. In HACS, add `https://github.com/jdgarcia99/ha-solarsplit` as a custom repository of type *Integration*.
 2. Install **SolarSplit** and restart Home Assistant.
 3. Go to **Settings → Devices & services → Add integration → SolarSplit**.
+
+## Try it in shadow mode
+
+There are no releases yet; HACS installs the latest commit of `main` and shows its short hash as the version. Every new commit appears as an update.
+
+1. **Install.** HACS → ⋮ → *Custom repositories* → `https://github.com/jdgarcia99/ha-solarsplit`, type *Integration*. Download **SolarSplit** and restart Home Assistant.
+2. **Set up.** *Settings → Devices & services → Add integration → SolarSplit*. Choose the grid export and import sensors (for example `sensor.meter_export_to_grid` and the import sensor of the energy meter), the global condition (`input_boolean.casa_activada`) and, if you use it, the zero-injection entity. **Leave Shadow mode on.**
+3. **Add the loads** with **Add load**, one per device: real nominal power (or a power sensor), priority (1 first), delays and minimum times as your automations use them today, the usage condition (for example `input_boolean.climatizar_casa` for the air conditioners) and, for the water heater, *Regulated externally when* = the FreeDS master switch. Untick *Respect the global condition* for loads that must run with the house empty, such as the pool pump.
+4. **Watch for a week or two**, next to your current automations, which keep doing the real work:
+   - **Last decision**: in its history, every `turn_on` / `turn_off` with its `load` and `reason` attributes is what SolarSplit would have done. Compare it with what your automations did.
+   - **State** and **Reason** of each load: `waiting` means it wants a change and the reason says what holds it (`on_delay`, `min_on_time`, `settling`…); `blocked` with `no_budget` or `waiting_higher` explains why a load stays off.
+   - **Available budget** next to your export sensor in a history graph: it should follow the surplus without jumping with every cloud.
+   - **Diagnostics** (integration menu) when something looks wrong: settings, memory of every load and the last cycle.
+5. **Tune** delays, margins and priorities until the decisions match what you expect. Priority changes apply at once; other changes reload the integration without losing its memory.
+
+When you are ready to hand over one load, turn **Manage** off on every other load, disable the automations of that load, and turn shadow mode off in the integration's settings. The master switch, or a load's **Manage** switch, gives control back to your automations at any time.
 
 ## Settings
 

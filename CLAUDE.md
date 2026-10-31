@@ -13,7 +13,7 @@ Custom Home Assistant integration (domain `solarsplit`), distributed through HAC
   - `const.py`: `CONF_*` keys, `DEFAULT_*` values and limits.
   - `__init__.py`: entry setup: coordinator in `entry.runtime_data`, platforms, reload when options or subentries change.
   - `entity.py`: base entity; one service device for the loop and one per load (entities of a load are added with `config_subentry_id`).
-  - `sensor.py` (budget, assigned power, mode, last decision; per load state and reason), `switch.py` (master switch and per-load Manage, both restored across restarts), `number.py` (per-load priority, written to the subentry, which reloads the entry), `diagnostics.py`.
+  - `sensor.py` (budget, assigned power, mode, last decision; per load state and reason), `switch.py` (master switch and per-load Manage, kept in the coordinator memory saved across restarts), `number.py` (per-load priority, applied on the fly and written to the subentry without reloading), `diagnostics.py`.
   - `strings.json`, `translations/en.json`, `translations/es.json`: UI text, including entity names and enum states.
   - `brand/`: icon and logos, rendered by `scripts/render_brand.py`.
 - Not implemented yet (see the design): zero-injection probing (the mode is detected and the engine stays paused), hourly net balance, services `force_on` / `force_off` / `recalculate`, daily targets and template conditions per load, time-on-today sensor.
@@ -24,7 +24,7 @@ Custom Home Assistant integration (domain `solarsplit`), distributed through HAC
 
 ## Safety
 
-The integration switches real devices (pool pump, air conditioners, water heater). Compressors and pumps must be protected by minimum on/off times; when in doubt, do nothing and report the reason. The control loop never switches loads off because it is paused or its global condition fails: it leaves them as they are. Shadow mode is on by default and must stay the default: a new install never acts until the user turns it off.
+The integration switches real devices (pool pump, air conditioners, water heater). Compressors and pumps must be protected by minimum on/off times; when in doubt, do nothing and report the reason. The control loop never switches loads off because it is paused (master switch off, unknown mode): it leaves them as they are. The only exception is the global condition: when it fails, it switches off the relay loads it switched on itself that respect the condition (`global_shutdown`), still honouring the minimum on time; manual loads are left alone. Shadow mode is on by default and must stay the default: a new install never acts until the user turns it off.
 
 ## Conventions
 

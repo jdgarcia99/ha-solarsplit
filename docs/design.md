@@ -90,7 +90,7 @@ Se suma lo que ya consumen las cargas gestionadas encendidas, porque ese exceden
 
 **Ciclo (cada 5 s por defecto):**
 
-1. Si el interruptor maestro está apagado o falla la condición global, no hace nada más (no apaga cargas: las deja como estén).
+1. Si el interruptor maestro está apagado, no hace nada más (no apaga cargas: las deja como estén). Si falla la condición global, solo apaga las cargas que encendió la propia integración y que respetan la condición (ver «Decisiones de implementación»); el resto se deja como esté.
 2. Si hay un cambio reciente en periodo de asentamiento (por defecto 30 s), espera.
 3. Recorre las cargas por prioridad y calcula el **estado deseado**: cada carga elegible entra si cabe en lo que queda de presupuesto, y se descuenta su potencia.
 4. Compara deseado y real. Elige un solo cambio: primero apagados (de menor a mayor prioridad), luego encendidos (de mayor a menor).
@@ -159,12 +159,14 @@ El atributo de diagnóstico de cada ciclo (presupuesto, cargas evaluadas, decisi
 - **Modo sombra** es un ajuste global (Opciones), **activado por defecto**: el bucle calcula y publica todo, pero nunca llama a un servicio sobre una carga. Así una instalación nueva no actúa hasta que se desactiva a propósito.
 - **Última decisión** es un sensor enum (`none`, `turn_on`, `turn_off`) con atributos `load`, `reason`, `budget` y `shadow`, en lugar de un texto libre: así se traduce en la UI y se puede usar en automatizaciones y gráficas.
 - **Motivo** es un sensor enum con los códigos del motor (`no_budget`, `on_delay`, `min_on_time`…), traducidos.
-- **Condición global y cargas que la ignoran.** Con la condición global apagada, las cargas que la respetan quedan fuera del reparto tal como estén (motivo `global_condition`) y su consumo no se reasigna; las que la ignoran (depuradora) siguen gestionándose.
+- **Condición global y cargas que la ignoran.** Con la condición global apagada, las cargas de relé que respetan la condición y que encendió SolarSplit (`owned`) se apagan (motivo `global_shutdown`): sin retardo de apagado, porque es una orden deliberada y no una nube, pero respetando el tiempo mínimo encendida. Las encendidas a mano, las apagadas y las variables quedan fuera del reparto tal como estén (motivo `global_condition`) y su consumo no se reasigna; las que ignoran la condición (depuradora) siguen gestionándose. En modo sombra se simula que SolarSplit es dueño de toda carga encendida, para publicar qué haría. El interruptor maestro, en cambio, nunca apaga nada.
 - **Cargas no disponibles** (entidad `unavailable`/`unknown`) se tratan igual: se dejan como estén.
 - **Control manual.** El coordinador recuerda el último estado que ordenó (`commanded`). Si la carga está en otro estado, es «manual» hasta que vuelva a ese estado o se reactive su interruptor Gestionar, que adopta el estado actual.
-- **Prioridad** (number) se guarda en la subentrada de la carga, así que cambiarla recarga la integración.
+- **Prioridad** (number) se aplica al vuelo y se guarda en la subentrada de la carga. El coordinador guarda una instantánea de la configuración con la que se creó; el listener de actualización solo recarga si la entrada difiere de ella, así que el cambio de prioridad no recarga.
+- **Memoria persistente** (`Store` de Home Assistant, `solarsplit.<entry_id>`): por carga, `managed`, `commanded`, las marcas de retardo y la última transición observada (`last_seen`, `last_change`), más el interruptor maestro y la última acción. Se guarda con retardo cada ciclo y de inmediato al descargar la entrada. Al arrancar, las marcas de retardo se descartan si el hueco supera 2 minutos. Los tiempos mínimos usan `last_change` propio y no `last_changed` de Home Assistant, que se reinicia al arrancar. Una carga que cambió con Home Assistant parado queda como manual porque difiere de `commanded`.
+- **Etiqueta** «Gestión de excedentes»: se crea si no existe y se pone a todas las entidades al configurar la entrada.
 - **Termo con FreeDS:** la carga tiene un campo «Regulada externamente cuando» (`freeds_maestro`). Con esa entidad encendida es una carga variable; apagada, un relé normal.
-- **Pendiente:** sondeo en inyección cero (el modo se detecta y el motor queda en pausa), balance neto horario, servicios, objetivo diario y condiciones por plantilla, sensor de tiempo encendida hoy, y poner la etiqueta «Gestión de excedentes» a las entidades.
+- **Pendiente:** sondeo en inyección cero (el modo se detecta y el motor queda en pausa), balance neto horario, servicios, objetivo diario y condiciones por plantilla y sensor de tiempo encendida hoy.
 
 ## Casos especiales
 

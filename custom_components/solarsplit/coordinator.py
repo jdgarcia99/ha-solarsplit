@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import timedelta
 from typing import Any
 
@@ -16,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -59,9 +60,13 @@ from .engine import (
     decide,
 )
 from .loads import async_switch_load, entity_is_on, load_is_on, read_watts
-from .settings import get_settings, load_settings
+from .settings import config_snapshot, get_settings, load_settings
 
 _LOGGER = logging.getLogger(__name__)
+
+STORAGE_VERSION = 1
+SAVE_DELAY = 10  # s, batch memory writes
+MARKS_MAX_GAP = 120  # s, delay marks older than this gap are dropped on restore
 
 MODE_NORMAL = "normal"
 MODE_ZERO_INJECTION = "zero_injection"
@@ -134,12 +139,26 @@ class LoadConfig:
 
 @dataclass
 class LoadMemory:
-    """What the coordinator remembers about a load between cycles."""
+    """What the coordinator remembers about a load between cycles, and across restarts."""
 
     managed: bool = True
     on_since: float | None = None
     off_since: float | None = None
     commanded: bool | None = None  # last state SolarSplit set; None = never, or adopted
+    last_seen: bool | None = None  # last usable on/off state observed
+    last_change: float | None = None  # time of the last on/off transition observed
+
+    def observe(self, is_on: bool | None, state: State | None) -> None:
+        """Track on/off transitions with our own clock, which survives restarts.
+
+        Home Assistant resets `last_changed` on restart; ours keeps the real time of
+        the last transition as long as the load is still in the state we last saw.
+        """
+        if is_on is None or state is None or is_on == self.last_seen:
+            return
+        if self.last_seen is not None or self.last_change is None:
+            self.last_change = state.last_changed.timestamp()
+        self.last_seen = is_on
 
 
 @dataclass(frozen=True)
@@ -180,6 +199,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         )
         self.loads = [LoadConfig.from_subentry(sub) for sub in entry.subentries.values()]
         self.memory = {load.id: LoadMemory() for load in self.loads}
+        self.snapshot = config_snapshot(entry)  # configuration this coordinator was built from
+        self._store: Store[dict[str, Any]] = Store(hass, STORAGE_VERSION, f"{DOMAIN}.{entry.entry_id}")
         self.engine_config = EngineConfig(
             safety_margin=self.settings[CONF_SAFETY_MARGIN],
             on_margin=self.settings[CONF_ON_MARGIN],
@@ -191,12 +212,73 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.last_action: float | None = None
         self._samples: deque[tuple[float, float, float]] = deque()
 
+    async def async_load_memory(self) -> None:
+        """Restore the memory saved by the previous run.
+
+        Delay marks only survive a short gap: nobody watched the condition while
+        Home Assistant was stopped.
+        """
+        if (data := await self._store.async_load()) is None:
+            return
+        self.active = data.get("active", True)
+        self.last_action = data.get("last_action")
+        fresh = dt_util.utcnow().timestamp() - data.get("saved_at", 0) <= MARKS_MAX_GAP
+        for load_id, saved in data.get("loads", {}).items():
+            if load_id not in self.memory:
+                continue  # load deleted since
+            memory = LoadMemory(**{k: v for k, v in saved.items() if k in LoadMemory.__dataclass_fields__})
+            if not fresh:
+                memory.on_since = memory.off_since = None
+            self.memory[load_id] = memory
+
+    def _memory_data(self) -> dict[str, Any]:
+        return {
+            "saved_at": dt_util.utcnow().timestamp(),
+            "active": self.active,
+            "last_action": self.last_action,
+            "loads": {load_id: asdict(memory) for load_id, memory in self.memory.items()},
+        }
+
+    def save_memory(self) -> None:
+        """Save the memory soon, batching changes."""
+        self._store.async_delay_save(self._memory_data, SAVE_DELAY)
+
+    async def async_save_memory(self) -> None:
+        """Save the memory now (before an unload, so a reload finds it)."""
+        await self._store.async_save(self._memory_data())
+
+    async def async_remove_memory(self) -> None:
+        """Delete the saved memory when the entry is removed."""
+        await self._store.async_remove()
+
+    def set_active(self, active: bool) -> None:
+        """Master switch."""
+        self.active = active
+        self.save_memory()
+
     def set_managed(self, load_id: str, managed: bool) -> None:
         """Include or exclude a load. Re-including it adopts its current state."""
         memory = self.memory[load_id]
         if managed and not memory.managed:
             memory.commanded = None
         memory.managed = managed
+        self.save_memory()
+
+    def load(self, load_id: str) -> LoadConfig:
+        """Current configuration of a load."""
+        return next(load for load in self.loads if load.id == load_id)
+
+    def set_priority(self, load_id: str, priority: int) -> None:
+        """Change a load's priority on the fly and store it in its subentry, without reloading."""
+        self.loads = [replace(load, priority=priority) if load.id == load_id else load for load in self.loads]
+        entry = self.config_entry
+        subentry = entry.subentries[load_id]
+        data = {**subentry.data, CONF_PRIORITY: priority}
+        # The update listener compares the entry against this snapshot and skips the
+        # reload. It may run inside async_update_subentry (eager task): set it first.
+        entry_data, options, loads = config_snapshot(entry)
+        self.snapshot = (entry_data, options, {**loads, load_id: (subentry.title, data)})
+        self.hass.config_entries.async_update_subentry(entry, subentry, data=data)
 
     def _state(self, entity_id: str | None) -> State | None:
         return self.hass.states.get(entity_id) if entity_id else None
@@ -215,10 +297,13 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         memory = self.memory[load.id]
         state = self._state(load.entity_id)
         is_on = load_is_on(state)
+        memory.observe(is_on, state)
         manual = (
             load.respect_manual and memory.commanded is not None
             and is_on is not None and is_on != memory.commanded
         )
+        # In shadow mode nothing was switched by us: simulate owning every load that is on.
+        owned = bool(is_on) if self.shadow else memory.commanded is True
         eligible = load.condition_entity is None or (
             (cond := self._state(load.condition_entity)) is not None and cond.state == load.condition_state
         )
@@ -233,6 +318,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             managed=memory.managed,
             available=is_on is not None,
             manual=manual,
+            owned=owned,
             global_ok=global_on or not load.respect_global,
             eligible=eligible,
             no_skip=load.no_skip,
@@ -240,7 +326,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             min_off=load.min_off,
             on_delay=load.on_delay,
             off_delay=load.off_delay,
-            last_change=state.last_changed.timestamp() if state is not None else None,
+            last_change=memory.last_change,
             on_since=memory.on_since,
             off_since=memory.off_since,
         )
@@ -275,6 +361,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
 
         if decision.action is not Action.NONE and not self.shadow:
             await self._async_execute(decision, now)
+        self.save_memory()
 
         return CycleResult(
             time=now, mode=mode, shadow=self.shadow, export_w=export_w, import_w=import_w,
@@ -285,7 +372,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
 
     async def _async_execute(self, decision: Decision, now: float) -> None:
         """Switch the load the engine chose."""
-        load = next(load for load in self.loads if load.id == decision.load_id)
+        load = self.load(decision.load_id)
         on = decision.action is Action.TURN_ON
         try:
             await async_switch_load(self.hass, load.entity_id, on, load.hvac_mode)
@@ -317,7 +404,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         return {
             "settings": self.settings,
             "loads": [load.__dict__ for load in self.loads],
-            "memory": {k: v.__dict__ for k, v in self.memory.items()},
+            "memory": {k: asdict(v) for k, v in self.memory.items()},
             "active": self.active,
             "last_action": self.last_action,
         }

@@ -8,7 +8,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from . import SolarSplitConfigEntry
-from .const import CONF_PRIORITY
 from .entity import SolarSplitEntity
 
 
@@ -22,7 +21,7 @@ async def async_setup_entry(
 
 
 class PriorityNumber(SolarSplitEntity, NumberEntity):
-    """Priority of a load. It is stored in the load's subentry, so changing it reloads the entry."""
+    """Priority of a load: applied on the fly and stored in the load's subentry."""
 
     _attr_entity_category = EntityCategory.CONFIG
     _attr_mode = NumberMode.BOX
@@ -32,13 +31,11 @@ class PriorityNumber(SolarSplitEntity, NumberEntity):
 
     @property
     def native_value(self) -> float:
-        """Configured priority."""
-        return self.load.priority
+        """Current priority."""
+        return self.coordinator.load(self.load.id).priority
 
     async def async_set_native_value(self, value: float) -> None:
-        """Store the new priority in the subentry."""
-        entry = self.coordinator.config_entry
-        subentry = entry.subentries[self.load.id]
-        self.hass.config_entries.async_update_subentry(
-            entry, subentry, data={**subentry.data, CONF_PRIORITY: int(value)}
-        )
+        """Apply the new priority without reloading, and run a cycle with it."""
+        self.coordinator.set_priority(self.load.id, int(value))
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
