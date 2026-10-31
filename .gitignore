@@ -6,3 +6,11 @@ __pycache__/
 .DS_Store
 .ruff_cache/
 .dev/
+.idea/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+*.log
+.env
+Thumbs.db
