@@ -109,6 +109,15 @@ def test_unmanaged_and_manual_loads_are_ignored() -> None:
     assert d.action is Action.NONE
 
 
+def test_global_condition_and_unavailable_leave_loads_as_they_are() -> None:
+    # Deficit, but neither load is ours to switch off, nor is its power reassigned
+    loads = [pool(is_on=True, global_ok=False), ac(is_on=True, available=False), heater()]
+    d = decide(NOW, Measurements(0, 400), loads, CFG)
+    assert d.reasons["pool"] is Reason.GLOBAL_CONDITION
+    assert d.reasons["ac"] is Reason.UNAVAILABLE
+    assert d.budget == -500 and d.action is Action.NONE
+
+
 def cycle(now: float, meas: Measurements, load: LoadState) -> tuple[Decision, LoadState]:
     """Run one cycle and store the marks back, as the coordinator does."""
     d = decide(now, meas, [load], CFG)

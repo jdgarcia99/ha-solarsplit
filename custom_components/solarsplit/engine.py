@@ -44,6 +44,8 @@ class Reason(StrEnum):
     OFF_DELAY = "off_delay"
     MANUAL = "manual"
     UNMANAGED = "unmanaged"
+    UNAVAILABLE = "unavailable"
+    GLOBAL_CONDITION = "global_condition"
     VARIABLE = "variable"
 
 
@@ -76,8 +78,10 @@ class LoadState:
     actual_w: float | None = None
     kind: LoadKind = LoadKind.RELAY
     managed: bool = True
+    available: bool = True  # its entity reports a usable state
     manual: bool = False
-    eligible: bool = True  # usage condition and, if it applies, the global condition hold
+    global_ok: bool = True  # the global condition holds, or this load ignores it
+    eligible: bool = True  # its usage condition holds
     no_skip: bool = False  # only enters when every eligible load before it is on
     min_on: float = 0  # s
     min_off: float = 0  # s
@@ -101,8 +105,11 @@ class LoadState:
 
     @property
     def controlled(self) -> bool:
-        """Whether the engine owns this load's power."""
-        return self.managed and not self.manual
+        """Whether the engine owns this load's power.
+
+        Loads it does not own are left as they are, and their power is not reassigned.
+        """
+        return self.managed and self.available and not self.manual and self.global_ok
 
 
 @dataclass(frozen=True)
@@ -152,8 +159,14 @@ def decide(
         if not load.managed:
             reasons[load.id] = Reason.UNMANAGED
             continue
+        if not load.available:
+            reasons[load.id] = Reason.UNAVAILABLE
+            continue
         if load.manual:
             reasons[load.id] = Reason.MANUAL
+            continue
+        if not load.global_ok:
+            reasons[load.id] = Reason.GLOBAL_CONDITION
             continue
         if load.kind is LoadKind.VARIABLE:
             remaining -= load.consumption
