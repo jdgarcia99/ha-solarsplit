@@ -40,6 +40,8 @@ class Reason(StrEnum):
     NOT_ELIGIBLE = "not_eligible"
     MIN_ON_TIME = "min_on_time"
     MIN_OFF_TIME = "min_off_time"
+    ON_DELAY = "on_delay"
+    OFF_DELAY = "off_delay"
     MANUAL = "manual"
     UNMANAGED = "unmanaged"
     VARIABLE = "variable"
@@ -79,7 +81,14 @@ class LoadState:
     no_skip: bool = False  # only enters when every eligible load before it is on
     min_on: float = 0  # s
     min_off: float = 0  # s
+    on_delay: float = 0  # s, the switch-on condition must hold this long
+    off_delay: float = 0  # s, the switch-off condition must hold this long
     last_change: float | None = None  # time of the last on/off transition
+    # Since when the switch-on / switch-off condition holds without interruption.
+    # The engine computes them (Decision.on_since / off_since); the caller stores
+    # them and passes them back in the next cycle.
+    on_since: float | None = None
+    off_since: float | None = None
 
     @property
     def consumption(self) -> float:
@@ -106,6 +115,13 @@ class Decision:
     reason: Reason = Reason.STEADY
     desired: dict[str, bool] = field(default_factory=dict)
     reasons: dict[str, Reason] = field(default_factory=dict)
+    on_since: dict[str, float] = field(default_factory=dict)  # loads whose switch-on condition holds
+    off_since: dict[str, float] = field(default_factory=dict)  # loads whose switch-off condition holds
+
+
+def _since(previous: float | None, now: float) -> float:
+    """Start of the current uninterrupted run of a condition that holds now."""
+    return now if previous is None else previous
 
 
 def compute_budget(meas: Measurements, loads: list[LoadState], cfg: EngineConfig) -> float:
@@ -174,20 +190,36 @@ def decide(
         (by_id[i] for i, on in desired.items() if on and not by_id[i].is_on),
         key=lambda load: (load.priority, load.id),
     )
+    # A load missing from these dicts does not meet the condition: its mark resets.
+    on_since = {load.id: _since(load.on_since, now) for load in ons}
+    off_since = {load.id: _since(load.off_since, now) for load in offs}
+
+    def result(action: Action = Action.NONE, load_id: str | None = None,
+               reason: Reason = Reason.STEADY) -> Decision:
+        return Decision(budget, action, load_id, reason, desired, reasons, on_since, off_since)
+
     if not offs and not ons:
-        return Decision(budget, desired=desired, reasons=reasons)
+        return result()
     if last_action is not None and now - last_action < cfg.settle_time:
-        return Decision(budget, reason=Reason.SETTLING, desired=desired, reasons=reasons)
+        return result(reason=Reason.SETTLING)
 
     # Switch-offs first; never switch on while a needed switch-off is blocked.
     action = Action.TURN_OFF if offs else Action.TURN_ON
     for load in offs or ons:
         since = float("inf") if load.last_change is None else now - load.last_change
-        if action is Action.TURN_OFF and since < load.min_on:
-            reasons[load.id] = Reason.MIN_ON_TIME
-            continue
-        if action is Action.TURN_ON and since < load.min_off:
-            reasons[load.id] = Reason.MIN_OFF_TIME
-            continue
-        return Decision(budget, action, load.id, reasons[load.id], desired, reasons)
-    return Decision(budget, desired=desired, reasons=reasons)
+        if action is Action.TURN_OFF:
+            if since < load.min_on:
+                reasons[load.id] = Reason.MIN_ON_TIME
+                continue
+            if now - off_since[load.id] < load.off_delay:
+                reasons[load.id] = Reason.OFF_DELAY
+                continue
+        else:
+            if since < load.min_off:
+                reasons[load.id] = Reason.MIN_OFF_TIME
+                continue
+            if now - on_since[load.id] < load.on_delay:
+                reasons[load.id] = Reason.ON_DELAY
+                continue
+        return result(action, load.id, reasons[load.id])
+    return result()

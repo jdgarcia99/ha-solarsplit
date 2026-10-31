@@ -5,12 +5,12 @@ Custom Home Assistant integration (domain `solarsplit`), distributed through HAC
 ## Layout
 
 - `custom_components/solarsplit/`
-  - `engine.py`: the control algorithm as a **pure function** (`decide()`): measurements and load states in, one `Decision` (at most one action, plus a `Reason` code per load) out. No Home Assistant imports, ever: it must stay testable with plain pytest and replayable over real days exported from InfluxDB.
+  - `engine.py`: the control algorithm as a **pure function** (`decide()`): measurements and load states in, one `Decision` (at most one action, plus a `Reason` code per load) out. No Home Assistant imports, ever: it must stay testable with plain pytest and replayable over real days exported from InfluxDB. All timing rules live here (settle time, minimum on/off times, on/off delays). State that must survive between cycles comes in through `LoadState` (`last_change`, `on_since`, `off_since`) and the new marks go out in the `Decision`; the coordinator only stores them and passes them back, it never decides.
   - `config_flow.py`: config flow (single entry) and options flow for the global settings. Both share `settings_schema()`.
   - `const.py`: `CONF_*` keys, `DEFAULT_*` values and limits.
   - `__init__.py`: `DEFAULTS`, `get_settings()` and entry setup.
   - `strings.json`, `translations/en.json`, `translations/es.json`: UI text.
-- Planned (see the design): config subentries per load, `coordinator.py` (loop, smoothing, sensor reading, stable-for-delay hysteresis), `loads.py` (switch / climate / input_boolean / variable adapters), `sensor.py`, `switch.py`, `number.py`, `diagnostics.py`, services `force_on`, `force_off`, `recalculate`, and a shadow mode that decides without acting.
+- Planned (see the design): config subentries per load, `coordinator.py` (loop, smoothing, sensor reading, storing the engine's marks), `loads.py` (switch / climate / input_boolean / variable adapters), `sensor.py`, `switch.py`, `number.py`, `diagnostics.py`, services `force_on`, `force_off`, `recalculate`, and a shadow mode that decides without acting.
 - `tests/`: pytest with `pytest-homeassistant-custom-component`. `test_engine.py` covers the engine without Home Assistant; `test_config_flow.py` the flows.
 - `docs/design.md`: design document.
 - `CHANGELOG.md`: one section per version.

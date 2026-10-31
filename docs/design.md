@@ -102,6 +102,13 @@ Se suma lo que ya consumen las cargas gestionadas encendidas, porque ese exceden
 - Apagar: solo si el déficit supera la tolerancia de importación (por defecto 150 W) durante el retardo de apagado.
 - Tiempo mínimo encendida y apagada: protege compresores de aire y la bomba de la depuradora.
 
+**Reparto entre motor y coordinador.** `engine.py` es una función pura y aplica todas las reglas de tiempo: asentamiento, tiempos mínimos y retardos de encendido y apagado. El coordinador no decide nada; solo guarda datos entre ciclos:
+
+- Por carga, dos marcas de tiempo: desde cuándo se cumple sin interrupción la condición de encendido (`on_since`, «cumple_on_desde») y la de apagado (`off_since`, «cumple_off_desde»).
+- El motor recibe las marcas en el estado de cada carga y devuelve las nuevas en la decisión (`Decision.on_since` / `off_since`). Una carga que no aparece ahí ya no cumple la condición y su marca vuelve a `None`. El coordinador las guarda tal cual y se las pasa en el ciclo siguiente.
+- Las calcula el motor porque saber si la condición se cumple depende del recorrido por prioridades (cuánto presupuesto queda al llegar a esa carga); calcularlas fuera duplicaría el algoritmo.
+- Si la condición se cumple pero no durante el retardo, el motor no actúa y devuelve el motivo `on_delay` u `off_delay`, igual que `min_on_time` y `min_off_time` para los tiempos mínimos. Las marcas siguen avanzando durante el asentamiento.
+
 **Saltos de prioridad:** si la carga de prioridad 2 no cabe pero la 3 sí, la 3 entra. Configurable por carga con «no saltar», para reproducir la regla actual de que los aires solo arrancan con depuradora y termo encendidos.
 
 **Respeto al control manual:** si una carga cambia de estado sin que la integración lo haya ordenado, pasa a «manual» y se excluye hasta que vuelva a su estado o se reactive su interruptor.

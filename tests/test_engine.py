@@ -1,7 +1,10 @@
 """Control engine, without Home Assistant."""
 
+from dataclasses import replace
+
 from custom_components.solarsplit.engine import (
     Action,
+    Decision,
     EngineConfig,
     LoadKind,
     LoadState,
@@ -104,3 +107,60 @@ def test_unmanaged_and_manual_loads_are_ignored() -> None:
     d = decide(NOW, Measurements(5000, 0), [pool(managed=False), ac(manual=True)], CFG)
     assert d.reasons == {"pool": Reason.UNMANAGED, "ac": Reason.MANUAL}
     assert d.action is Action.NONE
+
+
+def cycle(now: float, meas: Measurements, load: LoadState) -> tuple[Decision, LoadState]:
+    """Run one cycle and store the marks back, as the coordinator does."""
+    d = decide(now, meas, [load], CFG)
+    return d, replace(load, on_since=d.on_since.get(load.id), off_since=d.off_since.get(load.id))
+
+
+def test_on_delay_not_met_does_not_act() -> None:
+    load = pool(on_delay=60)
+    d, load = cycle(NOW, Measurements(1000, 0), load)
+    assert d.action is Action.NONE and d.reasons["pool"] is Reason.ON_DELAY
+    assert load.on_since == NOW
+    d, load = cycle(NOW + 30, Measurements(1000, 0), load)
+    assert d.action is Action.NONE and load.on_since == NOW
+
+
+def test_on_delay_met_acts() -> None:
+    load = pool(on_delay=60)
+    _, load = cycle(NOW, Measurements(1000, 0), load)
+    d, _ = cycle(NOW + 60, Measurements(1000, 0), load)
+    assert (d.action, d.load_id) == (Action.TURN_ON, "pool")
+
+
+def test_on_delay_restarts_when_condition_breaks() -> None:
+    load = pool(on_delay=60)
+    _, load = cycle(NOW, Measurements(1000, 0), load)
+    d, load = cycle(NOW + 40, Measurements(200, 0), load)  # a cloud
+    assert load.on_since is None and d.on_since == {}
+    d, load = cycle(NOW + 50, Measurements(1000, 0), load)
+    assert load.on_since == NOW + 50
+    d, load = cycle(NOW + 70, Measurements(1000, 0), load)  # 70 s since the first mark, 20 s of this run
+    assert d.action is Action.NONE and d.reasons["pool"] is Reason.ON_DELAY
+    d, _ = cycle(NOW + 110, Measurements(1000, 0), load)
+    assert d.action is Action.TURN_ON
+
+
+def test_off_delay_not_met_then_met() -> None:
+    load = pool(is_on=True, off_delay=30)
+    d, load = cycle(NOW, Measurements(0, 400), load)
+    assert d.action is Action.NONE and d.reasons["pool"] is Reason.OFF_DELAY
+    d, load = cycle(NOW + 30, Measurements(0, 400), load)
+    assert (d.action, d.load_id) == (Action.TURN_OFF, "pool")
+
+
+def test_off_delay_restarts_when_condition_breaks() -> None:
+    load = pool(is_on=True, off_delay=30)
+    _, load = cycle(NOW, Measurements(0, 400), load)
+    _, load = cycle(NOW + 20, Measurements(300, 0), load)  # the sun is back
+    assert load.off_since is None
+    d, load = cycle(NOW + 35, Measurements(0, 400), load)
+    assert d.action is Action.NONE and load.off_since == NOW + 35
+
+
+def test_marks_progress_while_settling() -> None:
+    d = decide(NOW, Measurements(1000, 0), [pool(on_delay=60)], CFG, last_action=NOW - 5)
+    assert d.reason is Reason.SETTLING and d.on_since == {"pool": NOW}
