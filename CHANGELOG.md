@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- New brand: icon and README banner, with SVG sources in `images/`. The orange logos and `scripts/render_brand.py` are gone.
+
 ## 0.1.0 (unreleased)
 
 - Loads as config subentries: add, edit and delete each load from the UI.

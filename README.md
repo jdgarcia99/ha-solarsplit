@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="images/banner.png" alt="SolarSplit" width="100%">
+</p>
+
 # SolarSplit
 
 [![Validate](https://github.com/jdgarcia99/ha-solarsplit/actions/workflows/validate.yml/badge.svg)](https://github.com/jdgarcia99/ha-solarsplit/actions/workflows/validate.yml)
