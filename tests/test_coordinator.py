@@ -18,6 +18,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.solarsplit.const import (
+    CONF_AUTO_MANAGE,
     CONF_CONDITION_ENTITY,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
@@ -30,16 +31,20 @@ from custom_components.solarsplit.const import (
     CONF_LIMIT_MAX,
     CONF_LOAD_ENTITY,
     CONF_LOAD_TYPE,
+    CONF_MANAGE_AT,
     CONF_MIN_OFF,
     CONF_MIN_ON,
     CONF_MODE_ENTITY,
     CONF_NOMINAL_POWER,
     CONF_OFF_DELAY,
     CONF_ON_DELAY,
+    CONF_ON_DEMAND,
     CONF_POWER_SENSOR,
     CONF_PRIORITY,
     CONF_RESPECT_GLOBAL,
     CONF_RESPECT_MANUAL,
+    CONF_SEASON_ENTITY,
+    CONF_SEASONS,
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
@@ -864,3 +869,274 @@ async def test_signed_grid_sensor_unusable(hass: HomeAssistant, value: str) -> N
     entry = await _setup_signed(hass, -1500)
     await _signed_cycle(hass, entry, value)
     _assert_grid_unknown(hass, entry)
+
+
+# ---------------------------------------------------------------------------
+# On demand
+# ---------------------------------------------------------------------------
+
+
+def _request(hass: HomeAssistant, entry: MockConfigEntry, entity: str) -> str:
+    return hass.states.get(_entity(hass, f"{_sub_id(entry, entity)}_request", "binary_sensor")).state
+
+
+async def test_on_demand_load_follows_its_request(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    entry = await _setup(hass, shadow=False, loads=[_load("Pool", POOL, 750, 1, **{CONF_ON_DEMAND: True})])
+    switch_on = async_mock_service(hass, "switch", "turn_on")
+    switch_off = async_mock_service(hass, "switch", "turn_off")
+
+    # Plenty of surplus, first in line: never switched on without a request.
+    await _cycle(hass, entry, export=3000)
+    assert _request(hass, entry, POOL) == "off"
+    assert _state(hass, entry, "load_reason", POOL) == "waiting_request"
+    assert _state(hass, entry, "load_state", POOL) == "blocked"
+    assert switch_on == []
+
+    # Someone switches it on: a request. Its power is now ours to reassign.
+    hass.states.async_set(POOL, "on")
+    await _cycle(hass, entry, export=100)
+    assert _request(hass, entry, POOL) == "on"
+    assert _state(hass, entry, "load_state", POOL) == "on"  # not manual
+
+    # The surplus runs out: SolarSplit switches it off, the request stays.
+    await _cycle(hass, entry, imp=900)
+    assert [c.data["entity_id"] for c in switch_off] == [POOL]
+    hass.states.async_set(POOL, "off")
+    freezer.tick(timedelta(seconds=31))
+    await _cycle(hass, entry, imp=100)
+    assert _request(hass, entry, POOL) == "on"
+    assert _state(hass, entry, "load_reason", POOL) == "no_budget"
+
+    # The surplus comes back: switched on again.
+    freezer.tick(timedelta(seconds=31))
+    await _cycle(hass, entry, export=1000)
+    assert [c.data["entity_id"] for c in switch_on] == [POOL]
+    hass.states.async_set(POOL, "on")
+    await _cycle(hass, entry, export=300)
+
+    # Someone switches it off: the request ends, and it stays off.
+    hass.states.async_set(POOL, "off")
+    freezer.tick(timedelta(seconds=31))
+    await _cycle(hass, entry, export=3000)
+    assert _request(hass, entry, POOL) == "off"
+    assert _state(hass, entry, "load_reason", POOL) == "waiting_request"
+    assert len(switch_on) == 1
+
+
+async def test_on_demand_climate_gets_back_what_the_person_set(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    entry = await _setup(
+        hass, shadow=False,
+        loads=[_load("Salon", AC, 900, 1, **{CONF_ON_DEMAND: True, CONF_HVAC_MODE: "cool"})],
+    )
+    hvac = async_mock_service(hass, "climate", "set_hvac_mode")
+    temperature = async_mock_service(hass, "climate", "set_temperature")
+    fan = async_mock_service(hass, "climate", "set_fan_mode")
+
+    hass.states.async_set(AC, "heat", {"temperature": 22, "fan_mode": "low"})  # the person
+    await _cycle(hass, entry, imp=1000)
+    assert [c.data["hvac_mode"] for c in hvac] == ["off"]
+    hass.states.async_set(AC, "off", {"temperature": 22, "fan_mode": "low"})
+
+    freezer.tick(timedelta(seconds=31))
+    await _cycle(hass, entry, export=1500)
+    assert [c.data["hvac_mode"] for c in hvac] == ["off", "heat"]  # not the configured cool
+    assert [(c.data["temperature"]) for c in temperature] == [22]
+    assert [c.data["fan_mode"] for c in fan] == ["low"]
+
+
+async def test_on_demand_request_survives_a_restart(hass: HomeAssistant) -> None:
+    entry = await _setup(hass, shadow=False, loads=[_load("Salon", AC, 900, 1, **{CONF_ON_DEMAND: True})])
+    hass.states.async_set(AC, "heat", {"temperature": 21})
+    await _cycle(hass, entry, export=100)
+    await entry.runtime_data.async_save_memory()
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    memory = entry.runtime_data.memory[_sid(AC)]
+    assert memory.request is True
+    assert memory.request_settings == {"hvac_mode": "heat", "temperature": 21}
+    assert _request(hass, entry, AC) == "on"
+
+
+async def test_on_demand_in_shadow_mode_publishes_what_it_would_do(hass: HomeAssistant) -> None:
+    entry = await _setup(hass, loads=[_load("Pool", POOL, 750, 1, **{CONF_ON_DEMAND: True})])
+    calls = async_mock_service(hass, "switch", "turn_off")
+    await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_reason", POOL) == "waiting_request"
+    assert _state(hass, entry, "last_decision") == "none"
+    hass.states.async_set(POOL, "on")
+    await _cycle(hass, entry, imp=900)
+    assert _request(hass, entry, POOL) == "on"
+    assert _state(hass, entry, "last_decision") == "turn_off"
+    assert calls == []
+
+
+async def test_only_on_demand_loads_have_a_request_sensor(hass: HomeAssistant) -> None:
+    entry = await _setup(hass)
+    registry = er.async_get(hass)
+    assert registry.async_get_entity_id("binary_sensor", DOMAIN, f"{_sub_id(entry, POOL)}_request") is None
+
+
+# ---------------------------------------------------------------------------
+# Manage again automatically
+# ---------------------------------------------------------------------------
+
+
+async def _unmanage(hass: HomeAssistant, entry: MockConfigEntry, entity: str) -> str:
+    managed = _entity(hass, f"{_sub_id(entry, entity)}_managed", "switch")
+    await hass.services.async_call("switch", "turn_off", {"entity_id": managed}, blocking=True)
+    return managed
+
+
+async def test_manage_switches_back_on_when_the_load_goes_off(hass: HomeAssistant) -> None:
+    entry = await _setup(hass, loads=[_load("Pool", POOL, 750, 1, **{CONF_AUTO_MANAGE: True})], pool="on")
+    managed = await _unmanage(hass, entry, POOL)
+    await _cycle(hass, entry, export=100)
+    assert hass.states.get(managed).state == "off"
+    # Unmanaged: its power is the house's, not reassigned.
+    assert float(_state(hass, entry, "assigned_power")) == 0
+    assert float(_state(hass, entry, "budget")) == 0
+
+    hass.states.async_set(POOL, "off")
+    await _cycle(hass, entry, export=100)
+    assert hass.states.get(managed).state == "on"
+    assert entry.runtime_data.memory[_sid(POOL)].rearm_at is None
+
+
+async def test_manage_switches_back_on_at_the_time_set(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    await hass.config.async_set_time_zone("Europe/Madrid")
+    freezer.move_to("2026-11-23 20:00:00+01:00")
+    entry = await _setup(
+        hass, loads=[_load("Pool", POOL, 750, 1, **{CONF_AUTO_MANAGE: True, CONF_MANAGE_AT: "23:30:00"})],
+        pool="on",
+    )
+    managed = await _unmanage(hass, entry, POOL)
+    freezer.move_to("2026-11-23 23:29:00+01:00")
+    await _cycle(hass, entry)
+    assert hass.states.get(managed).state == "off"
+    freezer.move_to("2026-11-23 23:30:05+01:00")
+    await _cycle(hass, entry)
+    assert hass.states.get(managed).state == "on"
+    assert _state(hass, entry, "load_state", POOL) == "on"  # adopted as it is
+
+
+async def test_manage_stays_off_without_auto_manage(hass: HomeAssistant) -> None:
+    entry = await _setup(hass, loads=[_load("Pool", POOL, 750, 1)], pool="on")
+    managed = await _unmanage(hass, entry, POOL)
+    hass.states.async_set(POOL, "off")
+    await _cycle(hass, entry)
+    assert hass.states.get(managed).state == "off"
+
+
+# ---------------------------------------------------------------------------
+# Season
+# ---------------------------------------------------------------------------
+
+SEASON = "input_select.temporada_piscina"
+
+
+async def test_season_limits_the_load(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    hass.states.async_set(SEASON, "Verano", {"options": ["Verano", "Invierno"]})
+    entry = await _setup(
+        hass, shadow=False,
+        loads=[_load("Pool", POOL, 750, 1, **{CONF_SEASONS: ["Verano"]}), _load("Salon", AC, 900, 2)],
+        **{CONF_SEASON_ENTITY: SEASON},
+    )
+    switch_on = async_mock_service(hass, "switch", "turn_on")
+    switch_off = async_mock_service(hass, "switch", "turn_off")
+    await _cycle(hass, entry, export=1000)
+    assert [c.data["entity_id"] for c in switch_on] == [POOL]
+    hass.states.async_set(POOL, "on")
+
+    # Out of season: switched off, since SolarSplit switched it on.
+    hass.states.async_set(SEASON, "Invierno", {"options": ["Verano", "Invierno"]})
+    freezer.tick(timedelta(seconds=31))
+    await _cycle(hass, entry, export=300)
+    assert [c.data["entity_id"] for c in switch_off] == [POOL]
+    hass.states.async_set(POOL, "off")
+    freezer.tick(timedelta(seconds=31))
+    await _cycle(hass, entry, export=300)
+    assert _state(hass, entry, "load_reason", POOL) == "out_of_season"
+    assert _state(hass, entry, "load_state", POOL) == "blocked"
+    assert _state(hass, entry, "load_reason", AC) == "no_budget"  # the others go on
+
+    hass.states.async_set(SEASON, STATE_UNAVAILABLE)
+    await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_reason", POOL) == "season_unknown"
+
+
+async def test_out_of_season_leaves_a_load_someone_switched_on(hass: HomeAssistant) -> None:
+    hass.states.async_set(SEASON, "Invierno")
+    entry = await _setup(
+        hass, shadow=False, loads=[_load("Pool", POOL, 750, 1, **{CONF_SEASONS: ["Verano"]})],
+        **{CONF_SEASON_ENTITY: SEASON},
+    )
+    switch_off = async_mock_service(hass, "switch", "turn_off")
+    entry.runtime_data.memory[_sid(POOL)].commanded = False
+    hass.states.async_set(POOL, "on")  # a person
+    await _cycle(hass, entry, export=100)
+    assert switch_off == []
+
+
+async def test_season_and_usage_condition_both_apply(hass: HomeAssistant) -> None:
+    hass.states.async_set(SEASON, "Verano")
+    hass.states.async_set("input_boolean.climatizar", "off")
+    entry = await _setup(
+        hass, loads=[_load("Pool", POOL, 750, 1, **{
+            CONF_SEASONS: ["Verano"], CONF_CONDITION_ENTITY: "input_boolean.climatizar",
+        })],
+        **{CONF_SEASON_ENTITY: SEASON},
+    )
+    await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_reason", POOL) == "not_eligible"
+    hass.states.async_set("input_boolean.climatizar", "on")
+    await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_reason", POOL) == "fits"
+
+
+# ---------------------------------------------------------------------------
+# Combination: on demand, season and Manage off
+# ---------------------------------------------------------------------------
+
+
+async def test_on_demand_season_and_auto_manage_together(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    hass.states.async_set(SEASON, "Verano")
+    entry = await _setup(
+        hass, shadow=False,
+        loads=[_load("Pool", POOL, 750, 1, **{
+            CONF_ON_DEMAND: True, CONF_SEASONS: ["Verano"], CONF_AUTO_MANAGE: True,
+        })],
+        **{CONF_SEASON_ENTITY: SEASON},
+    )
+    switch_on = async_mock_service(hass, "switch", "turn_on")
+    managed = await _unmanage(hass, entry, POOL)
+
+    # Unmanaged: a request is still recorded, but nothing is decided.
+    hass.states.async_set(POOL, "on")
+    await _cycle(hass, entry, export=3000)
+    assert _request(hass, entry, POOL) == "on"
+    assert _state(hass, entry, "load_state", POOL) == "unmanaged"
+
+    # Switched off by the person: Manage is back, and the request has ended.
+    hass.states.async_set(POOL, "off")
+    await _cycle(hass, entry, export=3000)
+    assert hass.states.get(managed).state == "on"
+    assert _request(hass, entry, POOL) == "off"
+    assert _state(hass, entry, "load_reason", POOL) == "waiting_request"
+
+    # A new request out of season: not used.
+    hass.states.async_set(SEASON, "Invierno")
+    hass.states.async_set(POOL, "on")
+    await _cycle(hass, entry, export=3000)
+    hass.states.async_set(POOL, "off")  # not by SolarSplit... the person again
+    await _cycle(hass, entry, export=3000)
+    hass.states.async_set(POOL, "on")
+    await _cycle(hass, entry, export=3000)
+    assert _request(hass, entry, POOL) == "on"
+    assert _state(hass, entry, "load_reason", POOL) == "out_of_season"
+    assert switch_on == []

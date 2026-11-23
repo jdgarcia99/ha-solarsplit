@@ -13,6 +13,7 @@ Custom Home Assistant integration (domain `solarsplit`), distributed through HAC
   - `const.py`: `CONF_*` keys, `DEFAULT_*` values and limits.
   - `__init__.py`: entry setup: coordinator in `entry.runtime_data`, platforms, reload when options or subentries change.
   - `entity.py`: base entity; one service device for the loop and one per load (entities of a load are added with `config_subentry_id`).
+  - `binary_sensor.py` (per on-demand load: request active).
   - `sensor.py` (budget, assigned power, mode, last decision; per load state, reason and time on today), `switch.py` (master switch and per-load Manage, kept in the coordinator memory saved across restarts), `number.py` (per-load priority, applied on the fly and written to the subentry without reloading), `diagnostics.py`.
   - `strings.json`, `translations/en.json`, `translations/es.json`: UI text, including entity names and enum states.
   - `brand/`: `icon.png` and `icon@2x.png`, copied from `images/`.

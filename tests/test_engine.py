@@ -368,3 +368,86 @@ def test_daily_target_respects_min_on_time() -> None:
 def test_regulable_with_target_reached_gets_its_minimum() -> None:
     d = decide(NOW, Measurements(3000, 0), [replace(termo(500), hours_today=3, target_hours=2)], CFG)
     assert d.reasons["termo"] is Reason.TARGET_REACHED and d.writes == {"termo": 0}
+
+
+# On demand and season
+
+
+def test_on_demand_load_never_starts_without_a_request() -> None:
+    """Even first in line and with plenty of surplus."""
+    d = decide(NOW, Measurements(5000, 0), [pool(on_demand=True), ac()], CFG)
+    assert d.reasons["pool"] is Reason.WAITING_REQUEST
+    assert "pool" not in d.desired
+    assert (d.action, d.load_id) == (Action.TURN_ON, "ac")
+
+
+def test_on_demand_load_with_a_request_is_managed_by_priority() -> None:
+    d = decide(NOW, Measurements(1000, 0), [pool(on_demand=True, request=True)], CFG)
+    assert (d.action, d.load_id, d.reason) == (Action.TURN_ON, "pool", Reason.FITS)
+    # No surplus: switched off like any load, after its delays and minimum on time.
+    on = pool(on_demand=True, request=True, is_on=True, owned=True, last_change=NOW - 60, min_on=300)
+    d = decide(NOW, Measurements(0, 500), [on], CFG)
+    assert d.desired == {"pool": False}
+    assert d.reasons["pool"] is Reason.MIN_ON_TIME
+    d = decide(NOW, Measurements(0, 500), [replace(on, min_on=0)], CFG)
+    assert (d.action, d.load_id) == (Action.TURN_OFF, "pool")
+
+
+def test_on_demand_load_without_a_request_is_not_ours() -> None:
+    """Its power is not reassigned: someone else's load is the house's consumption."""
+    loads = [pool(on_demand=True, is_on=True, actual_w=700)]
+    assert compute_budget(Measurements(300, 0), loads, CFG) == 300 - 100
+    loads = [pool(on_demand=True, request=True, is_on=True, actual_w=700)]
+    assert compute_budget(Measurements(300, 0), loads, CFG) == 300 + 700 - 100
+
+
+def test_on_demand_load_left_on_by_us_without_a_request_goes_off() -> None:
+    d = decide(NOW, Measurements(5000, 0), [pool(on_demand=True, is_on=True, owned=True)], CFG)
+    assert (d.action, d.load_id, d.reason) == (Action.TURN_OFF, "pool", Reason.WAITING_REQUEST)
+
+
+def test_out_of_season_load_is_not_eligible() -> None:
+    d = decide(NOW, Measurements(5000, 0), [pool(in_season=False), ac()], CFG)
+    assert d.reasons["pool"] is Reason.OUT_OF_SEASON
+    assert (d.action, d.load_id) == (Action.TURN_ON, "ac")
+
+
+def test_out_of_season_switches_off_only_what_solarsplit_switched_on() -> None:
+    ours = pool(in_season=False, is_on=True, owned=True, off_delay=600)
+    d = decide(NOW, Measurements(5000, 0), [ours], CFG)
+    # Deliberate, like a global shutdown: no off delay.
+    assert (d.action, d.load_id, d.reason) == (Action.TURN_OFF, "pool", Reason.OUT_OF_SEASON)
+    d = decide(NOW, Measurements(5000, 0), [replace(ours, last_change=NOW - 60, min_on=300)], CFG)
+    assert d.reasons["pool"] is Reason.MIN_ON_TIME
+    theirs = pool(in_season=False, is_on=True, actual_w=700)
+    d = decide(NOW, Measurements(300, 0), [theirs], CFG)
+    assert d.action is Action.NONE and d.reasons["pool"] is Reason.OUT_OF_SEASON
+    assert d.budget == 300 - 100  # not ours: not reassigned
+
+
+def test_unknown_season_leaves_the_load() -> None:
+    d = decide(NOW, Measurements(5000, 0), [pool(in_season=None, is_on=True, owned=True)], CFG)
+    assert d.action is Action.NONE and d.reasons["pool"] is Reason.SEASON_UNKNOWN
+
+
+def test_season_and_usage_condition_must_both_hold() -> None:
+    d = decide(NOW, Measurements(5000, 0), [pool(in_season=True, eligible=False)], CFG)
+    assert d.reasons["pool"] is Reason.NOT_ELIGIBLE
+    d = decide(NOW, Measurements(5000, 0), [pool(in_season=False, eligible=True)], CFG)
+    assert d.reasons["pool"] is Reason.OUT_OF_SEASON
+
+
+def test_regulable_out_of_season_gets_its_minimum() -> None:
+    reg = Regulator(auto=True, current=1600, minimum=0, maximum=1600)
+    load = heater(kind=LoadKind.REGULABLE, regulator=reg, is_on=True, actual_w=0, in_season=False)
+    d = decide(NOW, Measurements(3000, 0), [load], CFG)
+    assert d.limits["heater"] == 0 and d.reasons["heater"] is Reason.OUT_OF_SEASON
+
+
+def test_on_demand_out_of_season_and_unmanaged() -> None:
+    """Combinations: the season and Manage come before the request."""
+    asked = pool(on_demand=True, request=True)
+    d = decide(NOW, Measurements(5000, 0), [replace(asked, in_season=False)], CFG)
+    assert d.reasons["pool"] is Reason.OUT_OF_SEASON and d.action is Action.NONE
+    d = decide(NOW, Measurements(5000, 0), [replace(asked, managed=False)], CFG)
+    assert d.reasons["pool"] is Reason.UNMANAGED and d.action is Action.NONE

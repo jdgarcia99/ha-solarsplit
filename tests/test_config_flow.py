@@ -11,6 +11,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.solarsplit import get_settings, load_settings
 from custom_components.solarsplit.const import (
+    CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
@@ -24,12 +25,16 @@ from custom_components.solarsplit.const import (
     CONF_LIMIT_THRESHOLD,
     CONF_LOAD_ENTITY,
     CONF_LOAD_TYPE,
+    CONF_MANAGE_AT,
     CONF_MODE_ENTITY,
     CONF_NOMINAL_POWER,
+    CONF_ON_DEMAND,
     CONF_POWER_SENSOR,
     CONF_PRIORITY,
     CONF_RESPECT_MANUAL,
     CONF_SAFETY_MARGIN,
+    CONF_SEASON_ENTITY,
+    CONF_SEASONS,
     CONF_STALE_TIMEOUT,
     CONF_TARGET_ENTITY,
     CONF_TARGET_HOURS,
@@ -43,6 +48,7 @@ from custom_components.solarsplit.const import (
     GRID_SIGN_EXPORT_POSITIVE,
     LOAD_TYPE_REGULABLE,
     LOAD_TYPE_RELAY,
+    SECTION_CONTROL,
     SECTION_DAILY_TARGET,
     SECTION_REGULABLE,
     SUBENTRY_LOAD,
@@ -289,8 +295,10 @@ async def test_options_flow_switches_to_signed_grid_sensor(hass: HomeAssistant) 
 
 
 # ---------------------------------------------------------------------------
-# Sections filled by the frontend
+# Sections filled by the frontend, manual control and season
 # ---------------------------------------------------------------------------
+
+SEASON = "input_select.temporada"
 
 
 async def test_sections_have_no_default(hass: HomeAssistant) -> None:
@@ -301,7 +309,7 @@ async def test_sections_have_no_default(hass: HomeAssistant) -> None:
     )
     fields = voluptuous_serialize.convert(result["data_schema"], custom_serializer=cv.custom_serializer)
     sections = [field for field in fields if field.get("type") == "expandable"]
-    assert {field["name"] for field in sections} == {SECTION_REGULABLE, SECTION_DAILY_TARGET}
+    assert {field["name"] for field in sections} == {SECTION_CONTROL, SECTION_REGULABLE, SECTION_DAILY_TARGET}
     assert all(field["required"] and "default" not in field for field in sections)
     regulable = _initial(fields)[SECTION_REGULABLE]
     assert regulable[CONF_AUTO_STATE] == DEFAULT_AUTO_STATE
@@ -320,3 +328,66 @@ async def test_editing_a_regulable_load_keeps_its_section(hass: HomeAssistant) -
     assert settings[CONF_LIMIT_ENTITY] == REGULABLE[CONF_LIMIT_ENTITY]
     assert settings[CONF_MODE_ENTITY] == REGULABLE[CONF_MODE_ENTITY]
     assert settings[CONF_LIMIT_MAX] == 1600
+
+
+async def test_load_with_manual_control_options(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    control = {CONF_ON_DEMAND: True, CONF_AUTO_MANAGE: True, CONF_MANAGE_AT: "03:30:00"}
+    result = await _add_load(hass, entry, {**LOAD, SECTION_CONTROL: control})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (subentry,) = entry.subentries.values()
+    assert SECTION_CONTROL not in subentry.data  # stored flat
+    settings = load_settings(subentry)
+    assert settings[CONF_ON_DEMAND] is True
+    assert settings[CONF_AUTO_MANAGE] is True
+    assert settings[CONF_MANAGE_AT] == "03:30:00"
+    assert settings[CONF_SEASONS] == []
+
+
+async def _setup_with_season(hass: HomeAssistant) -> MockConfigEntry:
+    hass.states.async_set(SEASON, "Verano", {"options": ["Verano", "Invierno", "Entretiempo"]})
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data={**SENSORS, CONF_SEASON_ENTITY: SEASON})
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    return entry
+
+
+async def test_seasons_offer_the_options_of_the_season_entity(hass: HomeAssistant) -> None:
+    entry = await _setup_with_season(hass)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_LOAD), context={"source": config_entries.SOURCE_USER}
+    )
+    control = result["data_schema"].schema[SECTION_CONTROL].schema.schema
+    seasons = next(value for key, value in control.items() if key == CONF_SEASONS)
+    assert seasons.config["options"] == ["Verano", "Invierno", "Entretiempo"]
+    assert seasons.config["multiple"] is True
+    result = await hass.config_entries.subentries.async_configure(
+        result["flow_id"], _submit(result, {**LOAD, SECTION_CONTROL: {CONF_SEASONS: ["Verano"]}})
+    )
+    (subentry,) = entry.subentries.values()
+    assert load_settings(subentry)[CONF_SEASONS] == ["Verano"]
+
+
+async def test_seasons_kept_without_a_season_entity(hass: HomeAssistant) -> None:
+    """Without the entity the field is hidden and the stored seasons stay."""
+    entry = await _setup_entry(hass)
+    await _add_load(hass, entry, LOAD)
+    (subentry,) = entry.subentries.values()
+    hass.config_entries.async_update_subentry(entry, subentry, data={**subentry.data, CONF_SEASONS: ["Verano"]})
+    await hass.async_block_till_done()
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_LOAD),
+        context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": subentry.subentry_id},
+    )
+    assert CONF_SEASONS not in result["data_schema"].schema[SECTION_CONTROL].schema.schema
+    result = await hass.config_entries.subentries.async_configure(result["flow_id"], _submit(result, {}))
+    assert result["reason"] == "reconfigure_successful"
+    assert load_settings(entry.subentries[subentry.subentry_id])[CONF_SEASONS] == ["Verano"]
+
+
+async def test_options_set_and_clear_the_season_entity(hass: HomeAssistant) -> None:
+    entry = await _setup_with_season(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], SENSORS)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert get_settings(entry)[CONF_SEASON_ENTITY] is None  # cleared

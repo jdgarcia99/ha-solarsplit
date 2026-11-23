@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from math import floor
+from typing import Any
 
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -20,6 +21,9 @@ CLIMATE = "climate"
 HVAC_OFF = "off"
 UNUSABLE = (STATE_UNAVAILABLE, STATE_UNKNOWN)
 HOURS_PER = {"h": 1.0, "min": 1 / 60, "s": 1 / 3600}
+# Climate attributes a person sets, kept for an on-demand load and restored on switch-on.
+TEMPERATURE_KEYS = ("temperature", "target_temp_low", "target_temp_high")
+FAN_MODE = "fan_mode"
 WATTS_PER = {UnitOfPower.WATT: 1.0, UnitOfPower.KILO_WATT: 1000.0, UnitOfPower.MEGA_WATT: 1_000_000.0}
 
 
@@ -93,15 +97,41 @@ async def async_set_limit(hass: HomeAssistant, entity_id: str, value: float) -> 
     return value
 
 
-async def async_switch_load(hass: HomeAssistant, entity_id: str, on: bool, hvac_mode: str) -> None:
-    """Switch a load on or off with the service its domain needs."""
+def climate_settings(state: State) -> dict[str, Any] | None:
+    """HVAC mode, target temperature and fan mode of a climate that is on; None otherwise."""
+    if state.domain != CLIMATE or state.state in (*UNUSABLE, HVAC_OFF):
+        return None
+    settings: dict[str, Any] = {"hvac_mode": state.state}
+    for key in (*TEMPERATURE_KEYS, FAN_MODE):
+        if (value := state.attributes.get(key)) is not None:
+            settings[key] = value
+    return settings
+
+
+async def async_switch_load(
+    hass: HomeAssistant, entity_id: str, on: bool, hvac_mode: str, restore: dict[str, Any] | None = None
+) -> None:
+    """Switch a load on or off with the service its domain needs.
+
+    A climate switched on with `restore` gets back the HVAC mode, target temperature
+    and fan mode saved in it, instead of the load's configured mode.
+    """
     domain = split_entity_id(entity_id)[0]
     if domain == CLIMATE:
+        mode = (restore or {}).get("hvac_mode", hvac_mode) if on else HVAC_OFF
         await hass.services.async_call(
-            CLIMATE, "set_hvac_mode",
-            {ATTR_ENTITY_ID: entity_id, "hvac_mode": hvac_mode if on else HVAC_OFF},
-            blocking=True,
+            CLIMATE, "set_hvac_mode", {ATTR_ENTITY_ID: entity_id, "hvac_mode": mode}, blocking=True
         )
+        if on and restore:
+            if temperatures := {key: restore[key] for key in TEMPERATURE_KEYS if key in restore}:
+                await hass.services.async_call(
+                    CLIMATE, "set_temperature", {ATTR_ENTITY_ID: entity_id, **temperatures}, blocking=True
+                )
+            if FAN_MODE in restore:
+                await hass.services.async_call(
+                    CLIMATE, "set_fan_mode", {ATTR_ENTITY_ID: entity_id, FAN_MODE: restore[FAN_MODE]},
+                    blocking=True,
+                )
         return
     await hass.services.async_call(
         domain, SERVICE_TURN_ON if on else SERVICE_TURN_OFF, {ATTR_ENTITY_ID: entity_id}, blocking=True

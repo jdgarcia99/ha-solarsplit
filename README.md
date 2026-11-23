@@ -65,6 +65,7 @@ One device per load:
 | Reason (sensor) | Why, for example `no_budget`, `on_delay`, `min_on_time` or `not_eligible`. |
 | Priority (number) | Applied on the fly, without reloading; also stored in the load's settings. |
 | Time on today (sensor, h) | Hours the load has been on today, counted by SolarSplit from the load's state (whoever switched it). Resets at local midnight and survives restarts. |
+| Request active (binary sensor) | On-demand loads only: on while a request is active. |
 
 Diagnostics (on the integration's menu) include the settings, every load and the last cycle.
 
@@ -176,6 +177,7 @@ All settings live in the UI; there is no YAML. They can be changed later from th
 | PV power sensor | none | PV production (W). Needed for zero-injection mode. |
 | Zero-injection mode entity | none | When on, the loop probes loads instead of reading export. |
 | Global condition | none | When off, the loop switches off the loads it switched on that respect it, and leaves the rest as they are. |
+| Season entity | none | `input_select` or `select` with the current season. Loads can be limited to some of its options (see *Manual control and season*). |
 | Cycle interval | 5 s | How often the control loop runs. |
 | Safety margin | 100 W | Power never handed out to loads. |
 | Smoothing window | 30 s | Moving average applied to the readings. |
@@ -203,9 +205,22 @@ Each load is a subentry: on the integration's page, use **Add load**, and edit o
 | Minimum on / off time | 5 / 5 min | Protects compressors and pumps. |
 | Respect the global condition | on | When the global condition is off, switch this load off if SolarSplit switched it on (after its minimum on time); otherwise leave it as it is. |
 | Usage condition entity / state | none / `on` | The load is only used while that entity has that state. |
-| Respect manual changes | on | If someone else switches the load, stop controlling it until it returns to the state SolarSplit set. |
+| Respect manual changes | on | If someone else switches the load, stop controlling it until it returns to the state SolarSplit set. Ignored for on-demand loads. |
 | Climate mode when on | cool | For `climate` entities. |
 | Regulated externally when | none | Relay loads only. While this entity is on, the load is never switched but its power counts. |
+
+The **Manual control and season** section of the form (collapsed unless one of them is set):
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Only on demand | off | The load is only used while someone asks for it (see below). Replaces *Respect manual changes*. Relay loads only. |
+| Manage again automatically | off | When **Manage** is switched off, it switches back on by itself when the load goes off, or at the time below, whichever comes first. |
+| Manage again at | 00:00 | Local time at which Manage switches back on. |
+| Seasons | all year | Options of the season entity in which the load is used. Shown only when a season entity is set; empty: all year. |
+
+- **On demand.** Switching the load on from anywhere but SolarSplit (a person, an automation, a remote) starts a **request**; switching it off from anywhere but SolarSplit ends it. While the request lasts, the load is managed with its priority: SolarSplit switches it off when the surplus runs out (after its delays and minimum on time) and back on when the surplus returns; that switch-off does not end the request. Without a request it is never switched on, even first in line with surplus (reason `waiting_request`), and its power is the house's. A climate gets back, when switched on again, the HVAC mode, target temperature and fan mode that were set when it was asked for, not the load's *Climate mode when on*. The request is kept across restarts; the binary sensor **Request active** shows it. In shadow mode requests are followed the same way and the decisions are only published.
+- **Manage off.** While Manage is off the load's power is not reassigned: it counts as the house's consumption.
+- **Season.** Out of season the load is not used (reason `out_of_season`) and, if SolarSplit switched it on, it is switched off at once (no switch-off delay; its minimum on time is respected); a load someone else switched on is left as it is. A regulable load gets its minimum limit. The season and the usage condition must both hold. While the season entity cannot be read, the load is left as it is (`season_unknown`).
 
 The **Daily target** section of the form (collapsed unless a target is set):
 

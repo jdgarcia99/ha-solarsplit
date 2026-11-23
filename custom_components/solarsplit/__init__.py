@@ -20,7 +20,7 @@ from .settings import (
 
 __all__ = ["DEFAULTS", "LOAD_DEFAULTS", "get_settings", "load_settings"]
 
-PLATFORMS: list[Platform] = [Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
+PLATFORMS: list[Platform] = [Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SENSOR, Platform.SWITCH]
 
 type SolarSplitConfigEntry = ConfigEntry[SolarSplitCoordinator]
 

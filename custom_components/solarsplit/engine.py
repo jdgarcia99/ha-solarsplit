@@ -58,6 +58,9 @@ class Reason(StrEnum):
     EXTERNAL = "external"  # a regulable load outside its automatic mode: grid power, not ours
     FULL_POWER = "full_power"  # a regulable load with nothing ahead of it: limit at its maximum
     LIMITED = "limited"  # a regulable load limited to what the loads ahead of it leave
+    WAITING_REQUEST = "waiting_request"  # an on-demand load nobody asked for: not eligible
+    OUT_OF_SEASON = "out_of_season"  # the current season is not one of the load's
+    SEASON_UNKNOWN = "season_unknown"  # the season entity is not usable: left as it is
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,13 @@ class LoadState:
     hours_today: float | None = None
     target_hours: float | None = None
     target_done: bool = False
+    # Season: the current season is one of the load's (or it has none). None: the
+    # season entity is not usable, and the load is left as it is.
+    in_season: bool | None = True
+    # On demand: eligible only while a request is active (someone else switched it on,
+    # and nobody else has switched it off since).
+    on_demand: bool = False
+    request: bool = False
 
     @property
     def consumption(self) -> float:
@@ -156,6 +166,9 @@ class LoadState:
         return (
             self.managed and self.available and not self.manual and not self.switched_off
             and ((self.global_ok is True and self.eligible is not None) or self.shutdown)
+            and (self.in_season is True or self.season_off or self.shutdown
+                 or (self.in_season is False and self.regulator is not None))
+            and (not self.on_demand or self.request or self.demand_off or self.season_off or self.shutdown)
             and (self.regulator is None or self.regulator.auto)
         )
 
@@ -163,6 +176,18 @@ class LoadState:
     def shutdown(self) -> bool:
         """Whether the global condition failing means switching this load off."""
         return self.global_ok is False and self.owned and self.is_on and self.kind is LoadKind.RELAY
+
+    @property
+    def demand_off(self) -> bool:
+        """Whether an on-demand load SolarSplit left on must go off: nobody asks for it."""
+        return (
+            self.on_demand and not self.request and self.owned and self.is_on and self.kind is LoadKind.RELAY
+        )
+
+    @property
+    def season_off(self) -> bool:
+        """Whether being out of season means switching this load off: only if SolarSplit switched it on."""
+        return self.in_season is False and self.owned and self.is_on and self.kind is LoadKind.RELAY
 
 
 @dataclass(frozen=True)
@@ -276,8 +301,21 @@ def decide(
         if not load.global_ok:
             reasons[load.id] = Reason.GLOBAL_CONDITION
             continue
+        if load.in_season is None:
+            reasons[load.id] = Reason.SEASON_UNKNOWN
+            continue
+        if not load.in_season and load.regulator is None:
+            if load.season_off:
+                desired[load.id] = False
+            reasons[load.id] = Reason.OUT_OF_SEASON
+            continue
         if load.eligible is None:
             reasons[load.id] = Reason.CONDITION_UNKNOWN
+            continue
+        if load.on_demand and not load.request and load.regulator is None:
+            if load.demand_off:
+                desired[load.id] = False
+            reasons[load.id] = Reason.WAITING_REQUEST
             continue
         if load.kind is LoadKind.VARIABLE:
             remaining -= load.consumption
@@ -286,7 +324,9 @@ def decide(
             continue
         if (reg := load.regulator) is not None:
             # Its consumption is in the budget, so `remaining` is what it may take.
-            if not load.eligible:
+            if not load.in_season:
+                limits[load.id], reasons[load.id] = reg.minimum, Reason.OUT_OF_SEASON
+            elif not load.eligible:
                 limits[load.id], reasons[load.id] = reg.minimum, Reason.NOT_ELIGIBLE
             elif load.target_reached:
                 limits[load.id], reasons[load.id] = reg.minimum, Reason.TARGET_REACHED
@@ -359,9 +399,10 @@ def decide(
             if since < load.min_on:
                 reasons[load.id] = Reason.MIN_ON_TIME
                 continue
-            # A global shutdown is deliberate, not a passing cloud: no off delay,
-            # but the minimum on time still protects compressors and pumps.
-            if not load.shutdown and now - off_since[load.id] < load.off_delay:
+            # A global shutdown or the end of the season is deliberate, not a passing
+            # cloud: no off delay, but the minimum on time still protects compressors.
+            deliberate = load.shutdown or load.season_off
+            if not deliberate and now - off_since[load.id] < load.off_delay:
                 reasons[load.id] = Reason.OFF_DELAY
                 continue
         else:

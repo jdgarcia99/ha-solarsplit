@@ -13,7 +13,7 @@ from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.const import CONF_NAME
+from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
@@ -21,6 +21,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
@@ -40,6 +41,7 @@ from .const import (
     CONF_LIMIT_THRESHOLD,
     CONF_LOAD_ENTITY,
     CONF_LOAD_TYPE,
+    CONF_MANAGE_AT,
     CONF_MIN_OFF,
     CONF_MIN_ON,
     CONF_MODE_ENTITY,
@@ -47,12 +49,15 @@ from .const import (
     CONF_NOMINAL_POWER,
     CONF_OFF_DELAY,
     CONF_ON_DELAY,
+    CONF_ON_DEMAND,
     CONF_ON_MARGIN,
     CONF_POWER_SENSOR,
     CONF_PRIORITY,
     CONF_RESPECT_GLOBAL,
     CONF_RESPECT_MANUAL,
     CONF_SAFETY_MARGIN,
+    CONF_SEASON_ENTITY,
+    CONF_SEASONS,
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
@@ -79,6 +84,7 @@ from .engine import (
 from .loads import (
     async_set_limit,
     async_switch_load,
+    climate_settings,
     entity_has_state,
     entity_is_on,
     load_is_on,
@@ -114,6 +120,7 @@ LOAD_STATES = [
 _BLOCKING = (
     Reason.NOT_ELIGIBLE, Reason.WAITING_HIGHER, Reason.NO_BUDGET, Reason.GLOBAL_CONDITION,
     Reason.GLOBAL_UNKNOWN, Reason.CONDITION_UNKNOWN, Reason.SWITCHED_OFF, Reason.TARGET_REACHED,
+    Reason.WAITING_REQUEST, Reason.OUT_OF_SEASON, Reason.SEASON_UNKNOWN,
 )
 _STATE_FOR = {
     Reason.MANUAL: LOAD_MANUAL,
@@ -121,6 +128,16 @@ _STATE_FOR = {
     Reason.UNAVAILABLE: LOAD_UNAVAILABLE,
     Reason.EXTERNAL: LOAD_EXTERNAL,
 }
+
+
+def _next_time(clock: str) -> float:
+    """Timestamp of the next local occurrence of a time of day ("HH:MM[:SS]")."""
+    parsed = dt_util.parse_time(clock) or dt_util.parse_time("00:00:00")
+    now = dt_util.now()
+    moment = now.replace(hour=parsed.hour, minute=parsed.minute, second=parsed.second, microsecond=0)
+    if moment <= now:
+        moment += timedelta(days=1)
+    return moment.timestamp()
 
 
 @dataclass(frozen=True)
@@ -155,6 +172,10 @@ class LoadConfig:
     hours_sensor: str | None = None  # hours on today; None: SolarSplit's own count
     target_entity: str | None = None  # hours wanted per day, read every cycle
     target_hours: float = 0  # h, fixed target when there is no target entity; 0 = none
+    on_demand: bool = False  # eligible only while a request is active (replaces respect_manual)
+    auto_manage: bool = False  # Manage switches back on when the load goes off, or at manage_at
+    manage_at: str = "00:00:00"  # local time
+    seasons: tuple[str, ...] = ()  # options of the season entity; empty = all year
 
     @classmethod
     def from_subentry(cls, subentry: ConfigSubentry) -> LoadConfig:
@@ -189,6 +210,11 @@ class LoadConfig:
             hours_sensor=s[CONF_HOURS_SENSOR],
             target_entity=s[CONF_TARGET_ENTITY],
             target_hours=float(s[CONF_TARGET_HOURS]),
+            # A regulable load is never switched: requests make no sense for it.
+            on_demand=bool(s[CONF_ON_DEMAND]) and s[CONF_LOAD_TYPE] != LOAD_TYPE_REGULABLE,
+            auto_manage=bool(s[CONF_AUTO_MANAGE]),
+            manage_at=s[CONF_MANAGE_AT] or "00:00:00",
+            seasons=tuple(s[CONF_SEASONS] or ()),
         )
 
     @property
@@ -213,6 +239,9 @@ class LoadMemory:
     today: str | None = None  # local date the counters below refer to
     on_today: float = 0  # s on today in finished runs; the current run is added by on_time()
     target_done: str | None = None  # local date its daily target was reached
+    request: bool = False  # on demand: someone else switched it on and nobody else switched it off
+    request_settings: dict[str, Any] | None = None  # climate: what that person set, restored on switch-on
+    rearm_at: float | None = None  # Manage switches back on at this time (auto manage)
 
     def new_day(self, today: str) -> None:
         """Reset the day's counters when the local date changes."""
@@ -224,23 +253,34 @@ class LoadMemory:
         running = now - max(self.last_change, midnight) if self.last_seen and self.last_change else 0.0
         return self.on_today + max(running, 0.0)
 
-    def observe(self, is_on: bool | None, state: State | None, detect_off: bool, midnight: float = 0) -> None:
+    def observe(
+        self, is_on: bool | None, state: State | None, detect_off: bool, midnight: float = 0,
+        on_demand: bool = False,
+    ) -> None:
         """Track on/off transitions with our own clock, which survives restarts.
 
         Home Assistant resets `last_changed` on restart; ours keeps the real time of
         the last transition as long as the load is still in the state we last saw.
         With `detect_off`, a switch-off SolarSplit did not order (a safety cut, a
         person, an automation) marks the load as switched off until it is on again.
+        An on-demand load instead starts a request when something else switches it on
+        (or it is first seen on) and ends it when something else switches it off; a
+        switch-off ordered by SolarSplit keeps the request.
         """
         if is_on is None or state is None or is_on == self.last_seen:
             return
+        if on_demand:
+            if is_on and self.commanded is not True:
+                self.request = True
+            elif not is_on and self.last_seen and self.commanded is not False:
+                self.request, self.request_settings = False, None
         if self.last_seen and self.last_change is not None:  # a run ends: add it to today
             self.on_today += max(state.last_changed.timestamp() - max(self.last_change, midnight), 0.0)
         if self.last_seen is not None or self.last_change is None:
             self.last_change = state.last_changed.timestamp()
         if is_on:
             self.switched_off = False
-        elif self.last_seen and detect_off and self.commanded is not False:
+        elif self.last_seen and detect_off and not on_demand and self.commanded is not False:
             self.switched_off = True
         self.last_seen = is_on
 
@@ -345,13 +385,19 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.save_memory()
 
     def set_managed(self, load_id: str, managed: bool) -> None:
-        """Include or exclude a load. Re-including it adopts its current state."""
+        """Include or exclude a load. Re-including it adopts its current state.
+
+        With auto manage, excluding it also sets when it is included again by itself:
+        the next time of day configured (the switch-off of the load may come first).
+        """
         memory = self.memory[load_id]
         if managed and not memory.managed:
             memory.commanded = None
             memory.switched_off = False
             memory.target_done = None
         memory.managed = managed
+        load = self.load(load_id)
+        memory.rearm_at = _next_time(load.manage_at) if not managed and load.auto_manage else None
         self.save_memory()
 
     def load(self, load_id: str) -> LoadConfig:
@@ -426,16 +472,41 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             return hours, load.target_hours
         return hours, read_number(self._state(load.target_entity))
 
-    def _load_state(self, load: LoadConfig, global_on: bool | None, now: float) -> LoadState:
+    def _season(self) -> str | None:
+        """The current season (an option of the season entity), or None if it is not usable."""
+        state = self._state(self.settings[CONF_SEASON_ENTITY])
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            return None
+        return state.state
+
+    def _in_season(self, load: LoadConfig, season: str | None) -> bool | None:
+        """Whether the load is in season; None when the season is unknown."""
+        if not load.seasons or self.settings[CONF_SEASON_ENTITY] is None:
+            return True
+        return None if season is None else season in load.seasons
+
+    def _load_state(
+        self, load: LoadConfig, global_on: bool | None, now: float, season: str | None = None
+    ) -> LoadState:
         """Engine input for one load."""
         memory = self.memory[load.id]
         state = self._state(load.entity_id)
         is_on = load_is_on(state)
         memory.new_day(self._today)
+        was_on = memory.last_seen
         # In shadow mode nothing is switched by us, so every switch-off would look external.
-        memory.observe(is_on, state, detect_off=not self.shadow, midnight=self._midnight)
+        memory.observe(
+            is_on, state, detect_off=not self.shadow, midnight=self._midnight, on_demand=load.on_demand
+        )
+        if load.on_demand and memory.request and is_on and state is not None:
+            # What the person set, restored when SolarSplit switches it back on.
+            memory.request_settings = climate_settings(state)
+        if load.auto_manage and not memory.managed and (
+            (was_on and is_on is False) or (memory.rearm_at is not None and now >= memory.rearm_at)
+        ):
+            self.set_managed(load.id, True)
         manual = (
-            load.respect_manual and memory.commanded is not None
+            load.respect_manual and not load.on_demand and memory.commanded is not None
             and is_on is not None and is_on != memory.commanded
         )
         # In shadow mode nothing was switched by us: simulate owning every load that is on.
@@ -499,6 +570,9 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             hours_today=hours,
             target_hours=target,
             target_done=target_done,
+            in_season=self._in_season(load, season),
+            on_demand=load.on_demand,
+            request=memory.request,
         )
 
     async def _async_update_data(self) -> CycleResult:
@@ -524,7 +598,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         else:
             mode = MODE_NORMAL
 
-        states = [self._load_state(load, global_on, now) for load in self.loads]
+        season = self._season()
+        states = [self._load_state(load, global_on, now, season) for load in self.loads]
         decision = decide(
             now, meas, states, self.engine_config,
             self.last_action, active=mode == MODE_NORMAL, pause_reason=pause_reason,
@@ -557,8 +632,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         """Switch the load the engine chose."""
         load = self.load(decision.load_id)
         on = decision.action is Action.TURN_ON
+        # An on-demand climate goes back to what the person who asked for it set.
+        restore = self.memory[load.id].request_settings if on and load.on_demand else None
         try:
-            await async_switch_load(self.hass, load.entity_id, on, load.hvac_mode)
+            await async_switch_load(self.hass, load.entity_id, on, load.hvac_mode, restore)
         except HomeAssistantError as err:
             _LOGGER.warning("Could not switch %s %s: %s", load.entity_id, "on" if on else "off", err)
             return

@@ -22,7 +22,8 @@
           "shadow_mode": "Shadow mode",
           "stale_timeout": "Stale data timeout",
           "grid_sensor": "Signed grid power sensor",
-          "grid_sign": "Sign of the grid sensor"
+          "grid_sign": "Sign of the grid sensor",
+          "season_entity": "Season entity"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
@@ -39,7 +40,8 @@
           "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right.",
           "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check.",
           "grid_sensor": "One sensor with the grid power, export and import with opposite signs. Use either this one or both the export and import sensors. With one sensor, a reading not reported within the stale data timeout is unknown.",
-          "grid_sign": "Only for the signed grid sensor: whether export is negative or positive."
+          "grid_sign": "Only for the signed grid sensor: whether export is negative or positive.",
+          "season_entity": "Optional input select or select with the current season. Loads can be limited to some of its options."
         }
       }
     },
@@ -66,7 +68,8 @@
           "shadow_mode": "Shadow mode",
           "stale_timeout": "Stale data timeout",
           "grid_sensor": "Signed grid power sensor",
-          "grid_sign": "Sign of the grid sensor"
+          "grid_sign": "Sign of the grid sensor",
+          "season_entity": "Season entity"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
@@ -83,7 +86,8 @@
           "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right.",
           "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check.",
           "grid_sensor": "One sensor with the grid power, export and import with opposite signs. Use either this one or both the export and import sensors. With one sensor, a reading not reported within the stale data timeout is unknown.",
-          "grid_sign": "Only for the signed grid sensor: whether export is negative or positive."
+          "grid_sign": "Only for the signed grid sensor: whether export is negative or positive.",
+          "season_entity": "Optional input select or select with the current season. Loads can be limited to some of its options."
         }
       }
     },
@@ -133,12 +137,28 @@
             "respect_global_condition": "When the global condition is off, switch this load off if SolarSplit switched it on; otherwise leave it as it is. Untick for loads that must keep running, such as a pool pump.",
             "condition_entity": "The load is only used while this entity has the state below.",
             "condition_state": "State the usage condition entity must have, for example on.",
-            "respect_manual": "If someone else switches the load, stop controlling it until it returns to the state SolarSplit set.",
+            "respect_manual": "If someone else switches the load, stop controlling it until it returns to the state SolarSplit set. Ignored for on-demand loads.",
             "hvac_mode": "Only for climate entities.",
             "variable_entity": "Relay loads only. While this entity is on, the load is regulated elsewhere: SolarSplit never switches it, but its power counts. For a diverter, use the Regulable type instead.",
             "load_type": "Relay: SolarSplit switches it on and off. Regulable: the device regulates itself (a diverter) and SolarSplit only writes its power limit; fill in the Regulable load section."
           },
           "sections": {
+            "control": {
+              "name": "Manual control and season",
+              "description": "On demand, automatic return to management and the seasons in which the load is used.",
+              "data": {
+                "on_demand": "Only on demand",
+                "auto_manage": "Manage again automatically",
+                "manage_at": "Manage again at",
+                "seasons": "Seasons"
+              },
+              "data_description": {
+                "on_demand": "The load is only used while someone asks for it: switching it on from anywhere else (a person, an automation, a remote) starts a request, and switching it off from anywhere else ends it. While the request lasts SolarSplit switches it off when the surplus runs out and back on when it returns; a climate gets back the mode, temperature and fan mode that were set. SolarSplit never switches it on without a request. Replaces Respect manual changes.",
+                "auto_manage": "When Manage is switched off, it switches back on by itself when the load goes off, or at the time below.",
+                "manage_at": "Local time at which Manage switches back on.",
+                "seasons": "The load is only used in these seasons of the season entity (global settings). Empty: all year. Out of season it is not used, and SolarSplit switches it off if it switched it on."
+              }
+            },
             "regulable": {
               "name": "Regulable load",
               "description": "Only for the Regulable type. While the mode entity has the automatic value, the load's power is surplus: SolarSplit counts it and writes in the limit entity what the loads ahead of it leave (its maximum if nothing is ahead). In any other mode its power is grid power and the load is shown as external.",
@@ -212,12 +232,28 @@
             "respect_global_condition": "When the global condition is off, switch this load off if SolarSplit switched it on; otherwise leave it as it is. Untick for loads that must keep running, such as a pool pump.",
             "condition_entity": "The load is only used while this entity has the state below.",
             "condition_state": "State the usage condition entity must have, for example on.",
-            "respect_manual": "If someone else switches the load, stop controlling it until it returns to the state SolarSplit set.",
+            "respect_manual": "If someone else switches the load, stop controlling it until it returns to the state SolarSplit set. Ignored for on-demand loads.",
             "hvac_mode": "Only for climate entities.",
             "variable_entity": "Relay loads only. While this entity is on, the load is regulated elsewhere: SolarSplit never switches it, but its power counts. For a diverter, use the Regulable type instead.",
             "load_type": "Relay: SolarSplit switches it on and off. Regulable: the device regulates itself (a diverter) and SolarSplit only writes its power limit; fill in the Regulable load section."
           },
           "sections": {
+            "control": {
+              "name": "Manual control and season",
+              "description": "On demand, automatic return to management and the seasons in which the load is used.",
+              "data": {
+                "on_demand": "Only on demand",
+                "auto_manage": "Manage again automatically",
+                "manage_at": "Manage again at",
+                "seasons": "Seasons"
+              },
+              "data_description": {
+                "on_demand": "The load is only used while someone asks for it: switching it on from anywhere else (a person, an automation, a remote) starts a request, and switching it off from anywhere else ends it. While the request lasts SolarSplit switches it off when the surplus runs out and back on when it returns; a climate gets back the mode, temperature and fan mode that were set. SolarSplit never switches it on without a request. Replaces Respect manual changes.",
+                "auto_manage": "When Manage is switched off, it switches back on by itself when the load goes off, or at the time below.",
+                "manage_at": "Local time at which Manage switches back on.",
+                "seasons": "The load is only used in these seasons of the season entity (global settings). Empty: all year. Out of season it is not used, and SolarSplit switches it off if it switched it on."
+              }
+            },
             "regulable": {
               "name": "Regulable load",
               "description": "Only for the Regulable type. While the mode entity has the automatic value, the load's power is surplus: SolarSplit counts it and writes in the limit entity what the loads ahead of it leave (its maximum if nothing is ahead). In any other mode its power is grid power and the load is shown as external.",
@@ -353,7 +389,10 @@
           "external": "Regulated by the device outside its automatic mode",
           "full_power": "Full power: nothing ahead of it",
           "limited": "Limited to what the loads ahead leave",
-          "target_reached": "Daily target reached"
+          "target_reached": "Daily target reached",
+          "waiting_request": "Waiting for a request",
+          "out_of_season": "Out of season",
+          "season_unknown": "Season unknown"
         }
       },
       "on_today": {
@@ -371,6 +410,11 @@
     "number": {
       "priority": {
         "name": "Priority"
+      }
+    },
+    "binary_sensor": {
+      "request": {
+        "name": "Request active"
       }
     }
   }

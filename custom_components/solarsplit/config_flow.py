@@ -19,6 +19,7 @@ from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
@@ -38,6 +39,7 @@ from .const import (
     CONF_LIMIT_THRESHOLD,
     CONF_LOAD_ENTITY,
     CONF_LOAD_TYPE,
+    CONF_MANAGE_AT,
     CONF_MIN_OFF,
     CONF_MIN_ON,
     CONF_MODE_ENTITY,
@@ -45,6 +47,7 @@ from .const import (
     CONF_NOMINAL_POWER,
     CONF_OFF_DELAY,
     CONF_ON_DELAY,
+    CONF_ON_DEMAND,
     CONF_ON_MARGIN,
     CONF_POWER_SENSOR,
     CONF_PRIORITY,
@@ -52,6 +55,8 @@ from .const import (
     CONF_RESPECT_GLOBAL,
     CONF_RESPECT_MANUAL,
     CONF_SAFETY_MARGIN,
+    CONF_SEASON_ENTITY,
+    CONF_SEASONS,
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
@@ -68,6 +73,8 @@ from .const import (
     LOAD_TYPES,
     MAX_CYCLE_INTERVAL,
     MIN_CYCLE_INTERVAL,
+    SEASON_DOMAINS,
+    SECTION_CONTROL,
     SECTION_DAILY_TARGET,
     SECTION_REGULABLE,
     SUBENTRY_LOAD,
@@ -92,10 +99,11 @@ HOURS = selector.NumberSelector(
         min=0, max=24, step=0.1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement=UnitOfTime.HOURS
     )
 )
-SECTIONS = (SECTION_REGULABLE, SECTION_DAILY_TARGET)
+SEASON_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=SEASON_DOMAINS))
+SECTIONS = (SECTION_REGULABLE, SECTION_DAILY_TARGET, SECTION_CONTROL)
 OPTIONAL_ENTITIES = (
     CONF_GRID_SENSOR, CONF_EXPORT_SENSOR, CONF_IMPORT_SENSOR,
-    CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION,
+    CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION, CONF_SEASON_ENTITY,
 )
 
 
@@ -126,6 +134,7 @@ def settings_schema(values: dict[str, Any]) -> vol.Schema:
             _optional(CONF_PV_SENSOR, values): POWER_SENSOR,
             _optional(CONF_ZERO_INJECTION_ENTITY, values): BOOLEAN_ENTITY,
             _optional(CONF_GLOBAL_CONDITION, values): BOOLEAN_ENTITY,
+            _optional(CONF_SEASON_ENTITY, values): SEASON_ENTITY,
             vol.Required(CONF_CYCLE_INTERVAL, default=values[CONF_CYCLE_INTERVAL]): _number(
                 MIN_CYCLE_INTERVAL, MAX_CYCLE_INTERVAL, UnitOfTime.SECONDS
             ),
@@ -155,13 +164,14 @@ def validate_grid(user_input: dict[str, Any]) -> dict[str, str]:
     return {}
 
 
-def load_schema(values: dict[str, Any]) -> vol.Schema:
+def load_schema(values: dict[str, Any], seasons: list[str] | None = None) -> vol.Schema:
     """Schema of a load subentry, shared by its creation and reconfiguration.
 
     Sections are required and without a default: the frontend then fills each one
     with the defaults and suggested values of its fields. With `default={}` it sent
     an empty section, so its fields showed empty and editing a load cleared its
-    optional entities.
+    optional entities. `seasons` are the options of the season entity; without one
+    the field is not shown and the stored seasons are kept.
     """
 
     def required(key: str) -> vol.Required:
@@ -185,6 +195,19 @@ def load_schema(values: dict[str, Any]) -> vol.Schema:
             required(CONF_TARGET_HOURS): HOURS,
         }
     )
+    control: dict[Any, Any] = {
+        required(CONF_ON_DEMAND): selector.BooleanSelector(),
+        required(CONF_AUTO_MANAGE): selector.BooleanSelector(),
+        required(CONF_MANAGE_AT): selector.TimeSelector(),
+    }
+    if seasons is not None:
+        stored = [season for season in values[CONF_SEASONS] if season not in seasons]
+        control[required(CONF_SEASONS)] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[*seasons, *stored], multiple=True, mode=selector.SelectSelectorMode.LIST
+            )
+        )
+    control_set = values[CONF_ON_DEMAND] or values[CONF_AUTO_MANAGE] or values[CONF_SEASONS]
     return vol.Schema(
         {
             required(CONF_NAME): selector.TextSelector(),
@@ -208,6 +231,7 @@ def load_schema(values: dict[str, Any]) -> vol.Schema:
                 selector.SelectSelectorConfig(options=HVAC_MODES, translation_key=CONF_HVAC_MODE)
             ),
             _optional(CONF_VARIABLE_ENTITY, values): BOOLEAN_ENTITY,
+            vol.Required(SECTION_CONTROL): section(vol.Schema(control), {"collapsed": not control_set}),
             vol.Required(SECTION_REGULABLE): section(
                 regulable, {"collapsed": values[CONF_LOAD_TYPE] != LOAD_TYPE_REGULABLE}
             ),
@@ -283,12 +307,17 @@ class LoadSubentryFlow(ConfigSubentryFlow):
                 title=data[CONF_NAME], data=data, unique_id=data[CONF_LOAD_ENTITY]
             )
         values = {**LOAD_DEFAULTS, **data}
-        return self.async_show_form(step_id="user", data_schema=load_schema(values), errors=errors)
+        return self.async_show_form(
+            step_id="user", data_schema=load_schema(values, self._seasons()), errors=errors
+        )
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """Edit a load."""
         subentry = self._get_reconfigure_subentry()
         data = flatten(user_input or {})
+        if user_input is not None and CONF_SEASONS not in data:
+            # No season entity: the field is not shown, keep what was stored.
+            data[CONF_SEASONS] = subentry.data.get(CONF_SEASONS, [])
         errors = self._validate(user_input and data, subentry.subentry_id)
         if user_input is not None and not errors:
             return self.async_update_and_abort(
@@ -296,7 +325,17 @@ class LoadSubentryFlow(ConfigSubentryFlow):
                 data=data, unique_id=data[CONF_LOAD_ENTITY],
             )
         values = {**LOAD_DEFAULTS, **subentry.data, **data}
-        return self.async_show_form(step_id="reconfigure", data_schema=load_schema(values), errors=errors)
+        return self.async_show_form(
+            step_id="reconfigure", data_schema=load_schema(values, self._seasons()), errors=errors
+        )
+
+    def _seasons(self) -> list[str] | None:
+        """Options of the season entity of the entry; None without one."""
+        entity_id = get_settings(self._get_entry())[CONF_SEASON_ENTITY]
+        if entity_id is None:
+            return None
+        state = self.hass.states.get(entity_id)
+        return list(state.attributes.get("options", [])) if state else []
 
     def _validate(self, data: dict[str, Any] | None, own_id: str | None) -> dict[str, str]:
         """An entity belongs to one load only; a regulable load needs its entities and a valid range."""

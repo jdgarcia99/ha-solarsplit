@@ -22,7 +22,8 @@
           "shadow_mode": "Modo sombra",
           "stale_timeout": "Tiempo de datos congelados",
           "grid_sensor": "Sensor de potencia de red con signo",
-          "grid_sign": "Signo del sensor de red"
+          "grid_sign": "Signo del sensor de red",
+          "season_entity": "Entidad de temporada"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -39,7 +40,8 @@
           "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas.",
           "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación.",
           "grid_sensor": "Un solo sensor con la potencia de red, exportación e importación con signos opuestos. Usa este o los dos sensores de exportación e importación. Con un solo sensor, una lectura que no se informa en el tiempo de datos congelados es desconocida.",
-          "grid_sign": "Solo para el sensor de red con signo: si la exportación es negativa o positiva."
+          "grid_sign": "Solo para el sensor de red con signo: si la exportación es negativa o positiva.",
+          "season_entity": "Opcional. input_select o select con la temporada actual. Las cargas pueden limitarse a algunas de sus opciones."
         }
       }
     },
@@ -66,7 +68,8 @@
           "shadow_mode": "Modo sombra",
           "stale_timeout": "Tiempo de datos congelados",
           "grid_sensor": "Sensor de potencia de red con signo",
-          "grid_sign": "Signo del sensor de red"
+          "grid_sign": "Signo del sensor de red",
+          "season_entity": "Entidad de temporada"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -83,7 +86,8 @@
           "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas.",
           "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación.",
           "grid_sensor": "Un solo sensor con la potencia de red, exportación e importación con signos opuestos. Usa este o los dos sensores de exportación e importación. Con un solo sensor, una lectura que no se informa en el tiempo de datos congelados es desconocida.",
-          "grid_sign": "Solo para el sensor de red con signo: si la exportación es negativa o positiva."
+          "grid_sign": "Solo para el sensor de red con signo: si la exportación es negativa o positiva.",
+          "season_entity": "Opcional. input_select o select con la temporada actual. Las cargas pueden limitarse a algunas de sus opciones."
         }
       }
     },
@@ -133,12 +137,28 @@
             "respect_global_condition": "Si la condición global está apagada, apaga la carga si la encendió SolarSplit; si no, la deja como esté. Desmárcalo en cargas que deben seguir funcionando, como la depuradora.",
             "condition_entity": "La carga solo se usa mientras esta entidad tenga el estado indicado abajo.",
             "condition_state": "Estado que debe tener la entidad de condición de uso, por ejemplo on.",
-            "respect_manual": "Si otro cambia la carga, SolarSplit deja de controlarla hasta que vuelva al estado que él puso.",
+            "respect_manual": "Si otro cambia la carga, deja de controlarla hasta que vuelva al estado que puso SolarSplit. No se aplica a las cargas bajo demanda.",
             "hvac_mode": "Solo para entidades de climatización.",
             "variable_entity": "Solo cargas de relé. Mientras esta entidad esté encendida, la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta. Para un derivador, usa el tipo Regulable.",
             "load_type": "Relé: SolarSplit la enciende y la apaga. Regulable: el dispositivo se regula solo (un derivador) y SolarSplit solo escribe su límite de potencia; rellena la sección Carga regulable."
           },
           "sections": {
+            "control": {
+              "name": "Control manual y temporada",
+              "description": "Bajo demanda, vuelta automática a la gestión y temporadas en que se usa la carga.",
+              "data": {
+                "on_demand": "Solo bajo demanda",
+                "auto_manage": "Volver a gestionar automáticamente",
+                "manage_at": "Volver a gestionar a las",
+                "seasons": "Temporadas"
+              },
+              "data_description": {
+                "on_demand": "La carga solo se usa mientras alguien la pide: encenderla desde fuera (una persona, una automatización, un mando) abre una petición, y apagarla desde fuera la cierra. Durante la petición SolarSplit la apaga si falta excedente y la vuelve a encender cuando vuelve; un climatizador recupera el modo, la temperatura y el ventilador que se pusieron. SolarSplit nunca la enciende sin petición. Sustituye a Respetar cambios manuales.",
+                "auto_manage": "Cuando se apaga Gestionar, se vuelve a encender solo cuando la carga se apaga, o a la hora de abajo.",
+                "manage_at": "Hora local a la que Gestionar se vuelve a encender.",
+                "seasons": "La carga solo se usa en estas temporadas de la entidad de temporada (ajustes globales). Vacío: todo el año. Fuera de temporada no se usa, y SolarSplit la apaga si la encendió él."
+              }
+            },
             "regulable": {
               "name": "Carga regulable",
               "description": "Solo para el tipo Regulable. Mientras la entidad de modo tiene el valor automático, el consumo de la carga es excedente: SolarSplit lo cuenta y escribe en la entidad de límite lo que dejan las cargas que van antes (su máximo si no hay ninguna). En cualquier otro modo su consumo es de red y la carga se muestra como externa.",
@@ -212,12 +232,28 @@
             "respect_global_condition": "Si la condición global está apagada, apaga la carga si la encendió SolarSplit; si no, la deja como esté. Desmárcalo en cargas que deben seguir funcionando, como la depuradora.",
             "condition_entity": "La carga solo se usa mientras esta entidad tenga el estado indicado abajo.",
             "condition_state": "Estado que debe tener la entidad de condición de uso, por ejemplo on.",
-            "respect_manual": "Si otro cambia la carga, SolarSplit deja de controlarla hasta que vuelva al estado que él puso.",
+            "respect_manual": "Si otro cambia la carga, deja de controlarla hasta que vuelva al estado que puso SolarSplit. No se aplica a las cargas bajo demanda.",
             "hvac_mode": "Solo para entidades de climatización.",
             "variable_entity": "Solo cargas de relé. Mientras esta entidad esté encendida, la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta. Para un derivador, usa el tipo Regulable.",
             "load_type": "Relé: SolarSplit la enciende y la apaga. Regulable: el dispositivo se regula solo (un derivador) y SolarSplit solo escribe su límite de potencia; rellena la sección Carga regulable."
           },
           "sections": {
+            "control": {
+              "name": "Control manual y temporada",
+              "description": "Bajo demanda, vuelta automática a la gestión y temporadas en que se usa la carga.",
+              "data": {
+                "on_demand": "Solo bajo demanda",
+                "auto_manage": "Volver a gestionar automáticamente",
+                "manage_at": "Volver a gestionar a las",
+                "seasons": "Temporadas"
+              },
+              "data_description": {
+                "on_demand": "La carga solo se usa mientras alguien la pide: encenderla desde fuera (una persona, una automatización, un mando) abre una petición, y apagarla desde fuera la cierra. Durante la petición SolarSplit la apaga si falta excedente y la vuelve a encender cuando vuelve; un climatizador recupera el modo, la temperatura y el ventilador que se pusieron. SolarSplit nunca la enciende sin petición. Sustituye a Respetar cambios manuales.",
+                "auto_manage": "Cuando se apaga Gestionar, se vuelve a encender solo cuando la carga se apaga, o a la hora de abajo.",
+                "manage_at": "Hora local a la que Gestionar se vuelve a encender.",
+                "seasons": "La carga solo se usa en estas temporadas de la entidad de temporada (ajustes globales). Vacío: todo el año. Fuera de temporada no se usa, y SolarSplit la apaga si la encendió él."
+              }
+            },
             "regulable": {
               "name": "Carga regulable",
               "description": "Solo para el tipo Regulable. Mientras la entidad de modo tiene el valor automático, el consumo de la carga es excedente: SolarSplit lo cuenta y escribe en la entidad de límite lo que dejan las cargas que van antes (su máximo si no hay ninguna). En cualquier otro modo su consumo es de red y la carga se muestra como externa.",
@@ -353,7 +389,10 @@
           "external": "Regulada por el dispositivo fuera de su modo automático",
           "full_power": "Potencia máxima: nada por delante",
           "limited": "Limitada a lo que dejan las cargas anteriores",
-          "target_reached": "Objetivo diario cumplido"
+          "target_reached": "Objetivo diario cumplido",
+          "waiting_request": "Esperando una petición",
+          "out_of_season": "Fuera de temporada",
+          "season_unknown": "Temporada desconocida"
         }
       },
       "on_today": {
@@ -371,6 +410,11 @@
     "number": {
       "priority": {
         "name": "Prioridad"
+      }
+    },
+    "binary_sensor": {
+      "request": {
+        "name": "Petición activa"
       }
     }
   }

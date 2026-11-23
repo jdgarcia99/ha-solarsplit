@@ -20,6 +20,7 @@ CONF_ON_MARGIN = "on_margin"
 CONF_IMPORT_TOLERANCE = "import_tolerance"
 CONF_SHADOW_MODE = "shadow_mode"
 CONF_STALE_TIMEOUT = "stale_timeout"
+CONF_SEASON_ENTITY = "season_entity"  # input_select or select with the current season
 
 GRID_SIGN_EXPORT_NEGATIVE = "export_negative"  # negative = export, positive = import
 GRID_SIGN_EXPORT_POSITIVE = "export_positive"
@@ -69,6 +70,13 @@ CONF_LIMIT_MAX = "limit_max"
 CONF_LIMIT_THRESHOLD = "limit_threshold"
 CONF_LIMIT_INTERVAL = "limit_interval"
 
+# Manual control and season: section of the load form, flattened when stored
+SECTION_CONTROL = "control"
+CONF_ON_DEMAND = "on_demand"  # eligible only while someone else has switched it on
+CONF_AUTO_MANAGE = "auto_manage"  # Manage switches itself back on
+CONF_MANAGE_AT = "manage_at"  # local time at which Manage switches back on
+CONF_SEASONS = "seasons"  # options of the season entity; empty = all year
+
 # Daily target: section of the load form, flattened when stored
 SECTION_DAILY_TARGET = "daily_target"
 CONF_HOURS_SENSOR = "hours_sensor"
@@ -93,3 +101,5 @@ DEFAULT_LIMIT_MIN = 0  # W
 DEFAULT_LIMIT_MAX = 2000  # W
 DEFAULT_LIMIT_THRESHOLD = 100  # W, smallest change of the limit worth writing
 DEFAULT_LIMIT_INTERVAL = 30  # s, minimum time between two writes of the limit
+DEFAULT_MANAGE_AT = "00:00:00"
+SEASON_DOMAINS = ["input_select", "select"]
