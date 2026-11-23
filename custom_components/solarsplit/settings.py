@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from .const import (
     CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
+    CONF_CIRCUIT_SENSOR,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
     CONF_CYCLE_INTERVAL,
@@ -104,6 +105,7 @@ LOAD_DEFAULTS: dict[str, Any] = {
     CONF_IMPORT_SENSOR: None,
     CONF_LOAD_TYPE: LOAD_TYPE_RELAY,
     CONF_POWER_SENSOR: None,
+    CONF_CIRCUIT_SENSOR: None,
     CONF_PRIORITY: DEFAULT_PRIORITY,
     CONF_NO_SKIP: False,
     CONF_ON_DELAY: DEFAULT_ON_DELAY,

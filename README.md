@@ -66,6 +66,7 @@ One device per load:
 | Priority (number) | Applied on the fly, without reloading; also stored in the load's settings. |
 | Time on today (sensor, h) | Hours the load has been on today, counted by SolarSplit from the load's state (whoever switched it). Resets at local midnight and survives restarts. |
 | Request active (binary sensor) | On-demand loads only: on while a request is active. |
+| Learned power (sensor, W) | Loads with a circuit sensor only: mean of the valid measurements of its circuit's jumps; attributes `measurements`, `last_measurement` and `in_use`. |
 
 Diagnostics (on the integration's menu) include the settings, every load and the last cycle.
 
@@ -197,7 +198,8 @@ Each load is a subentry: on the integration's page, use **Add load**, and edit o
 | Load type | relay | **Relay**: switched on and off. **Regulable**: regulates itself (a diverter); SolarSplit only writes its power limit. See [Regulable loads](#regulable-loads). |
 | Entity | — | `switch`, `input_boolean` or `climate` entity that turns the load on and off. For a regulable load, the switch in front of it: never switched by SolarSplit; while it is off the load is blocked. |
 | Nominal power | — | Power drawn when on (W). |
-| Power sensor | none | Measured power; used instead of the nominal power when set. Required for a regulable load. |
+| Power sensor | none | Measured power; used instead of the nominal power when set. Required for a regulable load. Belongs to this load only. |
+| Circuit sensor | none | Power of the circuit the load is on, shared with other loads (for example an IoTaWatt channel with all the air conditioners). The load's power is learned from it (see *Learned power*). |
 | Priority | 10 | 1 is served first. |
 | Do not skip | off | Only switch on when every eligible load before it is on. |
 | Switch-on delay | 60 s | The surplus must cover the load this long before it is switched on. |
@@ -221,6 +223,15 @@ The **Manual control and season** section of the form (collapsed unless one of t
 - **On demand.** Switching the load on from anywhere but SolarSplit (a person, an automation, a remote) starts a **request**; switching it off from anywhere but SolarSplit ends it. While the request lasts, the load is managed with its priority: SolarSplit switches it off when the surplus runs out (after its delays and minimum on time) and back on when the surplus returns; that switch-off does not end the request. Without a request it is never switched on, even first in line with surplus (reason `waiting_request`), and its power is the house's. A climate gets back, when switched on again, the HVAC mode, target temperature and fan mode that were set when it was asked for, not the load's *Climate mode when on*. The request is kept across restarts; the binary sensor **Request active** shows it. In shadow mode requests are followed the same way and the decisions are only published.
 - **Manage off.** While Manage is off the load's power is not reassigned: it counts as the house's consumption.
 - **Season.** Out of season the load is not used (reason `out_of_season`) and, if SolarSplit switched it on, it is switched off at once (no switch-off delay; its minimum on time is respected); a load someone else switched on is left as it is. A regulable load gets its minimum limit. The season and the usage condition must both hold. While the season entity cannot be read, the load is left as it is (`season_unknown`).
+
+### Learned power
+
+A circuit meter measures several appliances at once (all the air conditioners on one channel, the radiators by floor), so it cannot be a load's power sensor. With a **circuit sensor**, SolarSplit learns the load's power from the circuit:
+
+- Every time the load switches (by SolarSplit or anyone else), it compares the circuit's mean power in the 20 s before the change with its mean from 20 to 60 s after it, skipping a compressor's start.
+- The measurement is discarded if another load of the same circuit switched in that window, or if the jump is below 50 W or above twice the nominal power.
+- The last 10 valid measurements are kept (across restarts). From 3 on, their mean replaces the nominal power, to decide the switch-on and to count the load's power while it is on. A load's own power sensor always wins.
+- A `climate` load's power varies with its compressor: while it is on, it counts at least its share of the circuit (the circuit's power divided among the loads of the circuit that are on), so the surplus is not overestimated.
 
 The **Daily target** section of the form (collapsed unless a target is set):
 

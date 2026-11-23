@@ -46,6 +46,7 @@ LOAD_DOMAINS = ["switch", "input_boolean", "climate"]
 CONF_LOAD_ENTITY = "entity_id"
 CONF_NOMINAL_POWER = "nominal_power"
 CONF_POWER_SENSOR = "power_sensor"
+CONF_CIRCUIT_SENSOR = "circuit_sensor"  # power of the circuit the load is on, shared with others
 CONF_PRIORITY = "priority"
 CONF_MIN_ON = "min_on"
 CONF_MIN_OFF = "min_off"

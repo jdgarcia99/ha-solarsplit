@@ -13,6 +13,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.solarsplit.config_flow import load_schema, settings_schema
 from custom_components.solarsplit.const import (
+    CONF_CIRCUIT_SENSOR,
     CONF_EXPORT_SENSOR,
     CONF_IMPORT_SENSOR,
     CONF_ON_DEMAND,
@@ -117,7 +118,10 @@ async def test_every_entity_has_a_translated_name(hass: HomeAssistant) -> None:
         domain=DOMAIN, unique_id=DOMAIN,
         data={CONF_EXPORT_SENSOR: "sensor.export", CONF_IMPORT_SENSOR: "sensor.import"},
         subentries_data=[{
-            "data": {"name": "Pool", "entity_id": "switch.pool", "nominal_power": 750, CONF_ON_DEMAND: True},
+            "data": {
+                "name": "Pool", "entity_id": "switch.pool", "nominal_power": 750,
+                CONF_ON_DEMAND: True, CONF_CIRCUIT_SENSOR: "sensor.circuit",
+            },
             "subentry_type": SUBENTRY_LOAD, "title": "Pool", "unique_id": "switch.pool",
         }],
     )
@@ -126,5 +130,6 @@ async def test_every_entity_has_a_translated_name(hass: HomeAssistant) -> None:
     await hass.async_block_till_done()
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     assert {entity.domain for entity in entities} == {"binary_sensor", "number", "sensor", "switch"}
+    assert "learned_power" in {entity.translation_key for entity in entities}
     for entity in entities:
         assert entity.translation_key in TEXTS["strings"]["entity"][entity.domain], entity.entity_id

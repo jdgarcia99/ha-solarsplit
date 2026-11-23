@@ -1,4 +1,4 @@
-"""Sensors: budget, assigned power, mode and last decision; state, reason and time on today of every load."""
+"""Sensors: budget, assigned power, mode and last decision; state, reason, time on today and learned power of every load."""
 
 from __future__ import annotations
 
@@ -12,11 +12,13 @@ from homeassistant.components.sensor import (
 from homeassistant.const import UnitOfPower, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
+from homeassistant.util import dt as dt_util
 
 from . import SolarSplitConfigEntry
 from .coordinator import LOAD_STATES, MODES, CycleResult, LoadView
 from .engine import Action, Reason
 from .entity import SolarSplitEntity
+from .learning import MIN_MEASUREMENTS
 
 ACTION_OPTIONS = [action.value for action in Action]
 REASON_OPTIONS = [reason.value for reason in Reason]
@@ -42,6 +44,8 @@ async def async_setup_entry(
             ],
             config_subentry_id=load.id,
         )
+        if load.circuit_sensor:
+            async_add_entities([LearnedPowerSensor(coordinator, "learned_power", load)], config_subentry_id=load.id)
 
 
 class PowerSensor(SolarSplitEntity, SensorEntity):
@@ -153,3 +157,29 @@ class OnTodaySensor(LoadSensor):
     def native_value(self) -> float:
         """Hours on today."""
         return round(self.view.on_today, 4)
+
+
+class LearnedPowerSensor(SolarSplitEntity, SensorEntity):
+    """Power learned from the jumps of the load's circuit when it switches."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 0
+
+    @property
+    def native_value(self) -> float | None:
+        """Mean of the valid measurements; unknown before the first one."""
+        learned = self.coordinator.memory[self.load.id].learned
+        return round(sum(learned) / len(learned), 1) if learned else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Number of measurements, time of the last one and whether it replaces the nominal power."""
+        memory = self.coordinator.memory[self.load.id]
+        last = memory.learned_at
+        return {
+            "measurements": len(memory.learned),
+            "last_measurement": None if last is None else dt_util.utc_from_timestamp(last).isoformat(),
+            "in_use": len(memory.learned) >= MIN_MEASUREMENTS and self.load.power_sensor is None,
+        }

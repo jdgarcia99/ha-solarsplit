@@ -19,6 +19,7 @@ from pytest_homeassistant_custom_component.common import (
 
 from custom_components.solarsplit.const import (
     CONF_AUTO_MANAGE,
+    CONF_CIRCUIT_SENSOR,
     CONF_CONDITION_ENTITY,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
@@ -1140,3 +1141,120 @@ async def test_on_demand_season_and_auto_manage_together(
     assert _request(hass, entry, POOL) == "on"
     assert _state(hass, entry, "load_reason", POOL) == "out_of_season"
     assert switch_on == []
+
+
+# ---------------------------------------------------------------------------
+# Power learned from the circuit
+# ---------------------------------------------------------------------------
+
+CIRCUIT = "sensor.iotawatt_aires"
+AC2 = "climate.ac_sara"
+
+
+async def _run(
+    hass: HomeAssistant, entry: MockConfigEntry, freezer: FrozenDateTimeFactory, seconds: int, circuit: float,
+    export: float = 0,
+) -> None:
+    """Cycles every 5 s with the circuit at `circuit` W."""
+    for _ in range(seconds // 5):
+        hass.states.async_set(CIRCUIT, str(circuit), {"unit_of_measurement": "W"})
+        freezer.tick(timedelta(seconds=5))
+        await _cycle(hass, entry, export=export)
+
+
+async def _switch(hass: HomeAssistant, entity: str, on: bool) -> None:
+    hass.states.async_set(entity, "cool" if on else "off")
+
+
+async def _learn(hass, entry, freezer, times: int = 3) -> None:
+    """The person switches the air conditioner on and off: 300 W base, 900 W more while on."""
+    for _ in range(times):
+        await _run(hass, entry, freezer, 30, 300)
+        await _switch(hass, AC, True)
+        await _run(hass, entry, freezer, 15, 3300)  # compressor start
+        await _run(hass, entry, freezer, 65, 1200)
+        await _switch(hass, AC, False)
+        await _run(hass, entry, freezer, 65, 300)
+
+
+def _ac(**extra: Any) -> dict:
+    return _load("Salon", AC, 1500, 1, **{CONF_CIRCUIT_SENSOR: CIRCUIT, **extra})
+
+
+async def test_power_is_learned_from_the_circuit(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    entry = await _setup(hass, loads=[_ac()])
+    learned = _entity(hass, f"{_sub_id(entry, AC)}_learned_power")
+    await _learn(hass, entry, freezer, times=1)
+    memory = entry.runtime_data.memory[_sid(AC)]
+    assert memory.learned == [900, 900]  # switching on and switching off
+    state = hass.states.get(learned)
+    assert float(state.state) == 900
+    assert state.attributes["measurements"] == 2
+    assert state.attributes["in_use"] is False  # fewer than 3: the nominal power is used
+    assert state.attributes["last_measurement"] is not None
+
+    # 1200 W of surplus: not enough for the nominal 1500 W.
+    await _cycle(hass, entry, export=1200)
+    assert _state(hass, entry, "load_reason", AC) == "no_budget"
+
+    await _learn(hass, entry, freezer, times=1)
+    assert hass.states.get(learned).attributes["in_use"] is True
+    # Learned 900 W: it fits now.
+    await _cycle(hass, entry, export=1200)
+    assert _state(hass, entry, "load_reason", AC) == "fits"
+
+
+async def test_another_load_of_the_circuit_switching_discards_the_measurement(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    hass.states.async_set(AC2, "off")
+    entry = await _setup(hass, loads=[_ac(), _load("Sara", AC2, 900, 2, **{CONF_CIRCUIT_SENSOR: CIRCUIT})])
+    await _run(hass, entry, freezer, 30, 300)
+    await _switch(hass, AC, True)
+    await _switch(hass, AC2, True)  # both at once
+    await _run(hass, entry, freezer, 65, 2100)
+    assert entry.runtime_data.memory[_sid(AC)].learned == []
+    assert entry.runtime_data.memory[_sid(AC2)].learned == []
+
+
+async def test_own_power_sensor_always_wins(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    hass.states.async_set("sensor.ac_power", "0", {"unit_of_measurement": "W"})
+    entry = await _setup(hass, loads=[_ac(**{CONF_POWER_SENSOR: "sensor.ac_power"})])
+    await _learn(hass, entry, freezer)
+    state = hass.states.get(_entity(hass, f"{_sub_id(entry, AC)}_learned_power"))
+    assert state.attributes["measurements"] == 6
+    assert state.attributes["in_use"] is False
+    await _cycle(hass, entry, export=1200)
+    assert _state(hass, entry, "load_reason", AC) == "no_budget"  # still the nominal 1500 W to switch on
+
+
+async def test_climate_on_counts_at_least_its_share_of_the_circuit(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    hass.states.async_set(AC2, "cool")
+    hass.states.async_set(AC, "cool")
+    entry = await _setup(
+        hass, loads=[_ac(), _load("Sara", AC2, 900, 2, **{CONF_CIRCUIT_SENSOR: CIRCUIT})]
+    )
+    hass.states.async_set(AC, "cool")
+    hass.states.async_set(AC2, "cool")
+    # The compressors draw 2800 W: 1400 W each, above Sara's 900 W, below Salon's 1500 W.
+    await _run(hass, entry, freezer, 5, 2800)
+    assert float(_state(hass, entry, "assigned_power")) == 1500 + 1400
+    # Without the circuit reading, the nominal powers.
+    hass.states.async_set(CIRCUIT, STATE_UNAVAILABLE)
+    await _cycle(hass, entry)
+    assert float(_state(hass, entry, "assigned_power")) == 1500 + 900
+
+
+async def test_learned_power_survives_a_restart(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    entry = await _setup(hass, loads=[_ac()])
+    await _learn(hass, entry, freezer)
+    learned = list(entry.runtime_data.memory[_sid(AC)].learned)
+    assert len(learned) == 6
+    await entry.runtime_data.async_save_memory()
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert entry.runtime_data.memory[_sid(AC)].learned == learned
+    await _cycle(hass, entry, export=1200)
+    assert _state(hass, entry, "load_reason", AC) == "fits"  # 900 W learned, not 1500 nominal

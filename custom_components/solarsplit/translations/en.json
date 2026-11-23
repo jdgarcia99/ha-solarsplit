@@ -109,6 +109,7 @@
             "entity_id": "Entity",
             "nominal_power": "Nominal power",
             "power_sensor": "Power sensor",
+            "circuit_sensor": "Circuit sensor",
             "priority": "Priority",
             "no_skip": "Do not skip",
             "on_delay": "Switch-on delay",
@@ -128,6 +129,7 @@
             "entity_id": "Switch, input boolean or climate entity that turns the load on and off. For a regulable load, the switch in front of it: SolarSplit never switches it, and while it is off the load is blocked.",
             "nominal_power": "Power the load draws when on.",
             "power_sensor": "Measured power of the load. When set, it is used instead of the nominal power. Required for a regulable load.",
+            "circuit_sensor": "Power of the circuit the load is on, shared with other loads (for example an IoTaWatt channel). Without its own power sensor, the load's power is learned from the jumps of the circuit when it switches and, after 3 measurements, used instead of the nominal power.",
             "priority": "1 is served first.",
             "no_skip": "Only switch on when every eligible load before it is on.",
             "on_delay": "The surplus must cover the load for this long before it is switched on.",
@@ -204,6 +206,7 @@
             "entity_id": "Entity",
             "nominal_power": "Nominal power",
             "power_sensor": "Power sensor",
+            "circuit_sensor": "Circuit sensor",
             "priority": "Priority",
             "no_skip": "Do not skip",
             "on_delay": "Switch-on delay",
@@ -223,6 +226,7 @@
             "entity_id": "Switch, input boolean or climate entity that turns the load on and off. For a regulable load, the switch in front of it: SolarSplit never switches it, and while it is off the load is blocked.",
             "nominal_power": "Power the load draws when on.",
             "power_sensor": "Measured power of the load. When set, it is used instead of the nominal power. Required for a regulable load.",
+            "circuit_sensor": "Power of the circuit the load is on, shared with other loads (for example an IoTaWatt channel). Without its own power sensor, the load's power is learned from the jumps of the circuit when it switches and, after 3 measurements, used instead of the nominal power.",
             "priority": "1 is served first.",
             "no_skip": "Only switch on when every eligible load before it is on.",
             "on_delay": "The surplus must cover the load for this long before it is switched on.",
@@ -450,6 +454,20 @@
       },
       "on_today": {
         "name": "Time on today"
+      },
+      "learned_power": {
+        "name": "Learned power",
+        "state_attributes": {
+          "measurements": {
+            "name": "Measurements"
+          },
+          "last_measurement": {
+            "name": "Last measurement"
+          },
+          "in_use": {
+            "name": "In use"
+          }
+        }
       }
     },
     "switch": {

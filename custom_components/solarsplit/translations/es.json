@@ -109,6 +109,7 @@
             "entity_id": "Entidad",
             "nominal_power": "Potencia nominal",
             "power_sensor": "Sensor de potencia",
+            "circuit_sensor": "Sensor del circuito",
             "priority": "Prioridad",
             "no_skip": "No saltar",
             "on_delay": "Retardo de encendido",
@@ -128,6 +129,7 @@
             "entity_id": "Interruptor, input boolean o climatización que enciende y apaga la carga. En una carga regulable, el interruptor que tiene delante: SolarSplit nunca lo conmuta y, mientras está apagado, la carga queda bloqueada.",
             "nominal_power": "Potencia que consume la carga encendida.",
             "power_sensor": "Potencia medida de la carga. Si se indica, se usa en lugar de la nominal. Obligatorio en una carga regulable.",
+            "circuit_sensor": "Potencia del circuito en el que está la carga, compartido con otras (por ejemplo un canal del IoTaWatt). Si la carga no tiene sensor de potencia propio, su potencia se aprende de los saltos del circuito al encenderse y apagarse y, tras 3 medidas, se usa en lugar de la nominal.",
             "priority": "La 1 se atiende primero.",
             "no_skip": "Solo se enciende si todas las cargas elegibles anteriores están encendidas.",
             "on_delay": "El excedente debe cubrir la carga durante este tiempo antes de encenderla.",
@@ -204,6 +206,7 @@
             "entity_id": "Entidad",
             "nominal_power": "Potencia nominal",
             "power_sensor": "Sensor de potencia",
+            "circuit_sensor": "Sensor del circuito",
             "priority": "Prioridad",
             "no_skip": "No saltar",
             "on_delay": "Retardo de encendido",
@@ -223,6 +226,7 @@
             "entity_id": "Interruptor, input boolean o climatización que enciende y apaga la carga. En una carga regulable, el interruptor que tiene delante: SolarSplit nunca lo conmuta y, mientras está apagado, la carga queda bloqueada.",
             "nominal_power": "Potencia que consume la carga encendida.",
             "power_sensor": "Potencia medida de la carga. Si se indica, se usa en lugar de la nominal. Obligatorio en una carga regulable.",
+            "circuit_sensor": "Potencia del circuito en el que está la carga, compartido con otras (por ejemplo un canal del IoTaWatt). Si la carga no tiene sensor de potencia propio, su potencia se aprende de los saltos del circuito al encenderse y apagarse y, tras 3 medidas, se usa en lugar de la nominal.",
             "priority": "La 1 se atiende primero.",
             "no_skip": "Solo se enciende si todas las cargas elegibles anteriores están encendidas.",
             "on_delay": "El excedente debe cubrir la carga durante este tiempo antes de encenderla.",
@@ -450,6 +454,20 @@
       },
       "on_today": {
         "name": "Tiempo encendida hoy"
+      },
+      "learned_power": {
+        "name": "Potencia aprendida",
+        "state_attributes": {
+          "measurements": {
+            "name": "Medidas"
+          },
+          "last_measurement": {
+            "name": "Última medida"
+          },
+          "in_use": {
+            "name": "En uso"
+          }
+        }
       }
     },
     "switch": {

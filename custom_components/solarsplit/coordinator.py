@@ -23,6 +23,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
+    CONF_CIRCUIT_SENSOR,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
     CONF_CYCLE_INTERVAL,
@@ -81,7 +82,9 @@ from .engine import (
     Regulator,
     decide,
 )
+from .learning import KEEP, Change, CircuitLearner, learned_power
 from .loads import (
+    CLIMATE,
     async_set_limit,
     async_switch_load,
     climate_settings,
@@ -176,6 +179,7 @@ class LoadConfig:
     auto_manage: bool = False  # Manage switches back on when the load goes off, or at manage_at
     manage_at: str = "00:00:00"  # local time
     seasons: tuple[str, ...] = ()  # options of the season entity; empty = all year
+    circuit_sensor: str | None = None  # power of its circuit: its power is learned from the jumps
 
     @classmethod
     def from_subentry(cls, subentry: ConfigSubentry) -> LoadConfig:
@@ -215,7 +219,13 @@ class LoadConfig:
             auto_manage=bool(s[CONF_AUTO_MANAGE]),
             manage_at=s[CONF_MANAGE_AT] or "00:00:00",
             seasons=tuple(s[CONF_SEASONS] or ()),
+            circuit_sensor=s[CONF_CIRCUIT_SENSOR],
         )
+
+    @property
+    def is_climate(self) -> bool:
+        """Whether the load is a climate entity."""
+        return self.entity_id.startswith(f"{CLIMATE}.")
 
     @property
     def has_target(self) -> bool:
@@ -242,6 +252,8 @@ class LoadMemory:
     request: bool = False  # on demand: someone else switched it on and nobody else switched it off
     request_settings: dict[str, Any] | None = None  # climate: what that person set, restored on switch-on
     rearm_at: float | None = None  # Manage switches back on at this time (auto manage)
+    learned: list[float] = field(default_factory=list)  # W, last jumps of its circuit when it switched
+    learned_at: float | None = None  # time of the change of the last valid measurement
 
     def new_day(self, today: str) -> None:
         """Reset the day's counters when the local date changes."""
@@ -339,6 +351,9 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self._samples: deque[tuple[float, float, float]] = deque()
         self._today = ""  # local date and start of day of the current cycle
         self._midnight = 0.0
+        self.learner = CircuitLearner()
+        self._circuits: dict[str, float] = {}  # W, each circuit's reading in this cycle
+        self._circuit_on: dict[str, int] = {}  # loads of each circuit that are on in this cycle
 
     async def async_load_memory(self) -> None:
         """Restore the memory saved by the previous run.
@@ -472,6 +487,24 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             return hours, load.target_hours
         return hours, read_number(self._state(load.target_entity))
 
+    def _read_circuits(self, now: float) -> None:
+        """Read every circuit sensor, feed the learner and store the measurements that are due."""
+        self._circuits, self._circuit_on = {}, {}
+        for load in self.loads:
+            if (circuit := load.circuit_sensor) is None:
+                continue
+            if circuit not in self._circuits and (watts := read_watts(self._state(circuit))) is not None:
+                self._circuits[circuit] = watts
+                self.learner.sample(circuit, now, watts)
+            if load_is_on(self._state(load.entity_id)):
+                self._circuit_on[circuit] = self._circuit_on.get(circuit, 0) + 1
+        for measurement in self.learner.due(now):
+            if measurement.power is None or measurement.change.load_id not in self.memory:
+                continue
+            memory = self.memory[measurement.change.load_id]
+            memory.learned = [*memory.learned, round(measurement.power, 1)][-KEEP:]
+            memory.learned_at = measurement.change.time
+
     def _season(self) -> str | None:
         """The current season (an option of the season entity), or None if it is not usable."""
         state = self._state(self.settings[CONF_SEASON_ENTITY])
@@ -498,6 +531,9 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         memory.observe(
             is_on, state, detect_off=not self.shadow, midnight=self._midnight, on_demand=load.on_demand
         )
+        if load.circuit_sensor and was_on is not None and is_on is not None and is_on != was_on:
+            # Any switch, by SolarSplit or not: measure the jump of its circuit.
+            self.learner.change(load.circuit_sensor, Change(load.id, memory.last_change, is_on), load.nominal_w)
         if load.on_demand and memory.request and is_on and state is not None:
             # What the person set, restored when SolarSplit switches it back on.
             memory.request_settings = climate_settings(state)
@@ -519,6 +555,15 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         if load.has_target and None in (hours, target) and not target_done and eligible:
             eligible = None  # unknown progress: left as it is
         actual_w = read_watts(self._state(load.power_sensor))
+        nominal = load.nominal_w
+        if load.power_sensor is None and load.circuit_sensor is not None:
+            # Its own meter always wins; otherwise the power learned from its circuit.
+            nominal = learned_power(memory.learned) or nominal
+            circuit = self._circuits.get(load.circuit_sensor)
+            if load.is_climate and is_on and circuit is not None:
+                # A compressor's power varies: never count less than its share of the circuit.
+                share = circuit / max(self._circuit_on.get(load.circuit_sensor, 1), 1)
+                actual_w = max(nominal, share)
         regulator = None
         switched_off = memory.switched_off and not self.shadow and is_on is False
         if load.regulable:
@@ -547,7 +592,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         return LoadState(
             id=load.id,
             priority=load.priority,
-            nominal_w=load.nominal_w,
+            nominal_w=nominal,
             is_on=bool(is_on),
             actual_w=actual_w,
             kind=kind,
@@ -598,6 +643,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         else:
             mode = MODE_NORMAL
 
+        self._read_circuits(now)
         season = self._season()
         states = [self._load_state(load, global_on, now, season) for load in self.loads]
         decision = decide(

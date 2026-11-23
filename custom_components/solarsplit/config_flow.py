@@ -21,6 +21,7 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
+    CONF_CIRCUIT_SENSOR,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
     CONF_CYCLE_INTERVAL,
@@ -217,6 +218,7 @@ def load_schema(values: dict[str, Any], seasons: list[str] | None = None) -> vol
             required(CONF_LOAD_ENTITY): LOAD_ENTITY,
             required(CONF_NOMINAL_POWER): _number(1, 20000, UnitOfPower.WATT),
             _optional(CONF_POWER_SENSOR, values): POWER_SENSOR,
+            _optional(CONF_CIRCUIT_SENSOR, values): POWER_SENSOR,
             required(CONF_PRIORITY): _number(1, 100),
             required(CONF_NO_SKIP): selector.BooleanSelector(),
             required(CONF_ON_DELAY): _number(0, 3600, UnitOfTime.SECONDS),

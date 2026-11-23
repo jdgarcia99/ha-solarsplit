@@ -2,6 +2,8 @@
 
 ## 0.2.0 (unreleased)
 
+- **Power learned from the circuit**: optional per-load *Circuit sensor* (the power of a circuit shared with other loads, such as an IoTaWatt channel). Each switch of the load, by SolarSplit or anyone else, measures the circuit's jump (mean of the 20 s before against 20–60 s after, skipping a compressor's start); a measurement is discarded if another load of the circuit switched in the window, or if the jump is below 50 W or above twice the nominal power. The last 10 valid measurements are kept in the store; from 3 on their mean replaces the nominal power, unless the load has its own power sensor. A climate load that is on counts at least its share of the circuit. New sensor *Learned power* (W) per load with a circuit sensor, with the number of measurements, the last one and whether it is in use.
+
 - Translations of the attributes of *Last decision* (`load`, `reason` with every reason code, `budget`, `shadow`) and of each load's *State* (`power`, `limit`), in English and Spanish. A test checks that `strings.json`, `en.json` and `es.json` have the same keys and that every enum state, selector option, reason code, form field and entity has its text.
 
 - Fix: the load form's sections came with an empty default, so the frontend sent them empty: their fields showed blank and editing a load cleared its optional entities (a regulable load could not be saved again). Sections are now required and without a default, like in Home Assistant core; the frontend fills them from their fields.
