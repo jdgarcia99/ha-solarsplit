@@ -102,13 +102,14 @@
             "condition_state": "Estado de la condición de uso",
             "respect_manual": "Respetar cambios manuales",
             "hvac_mode": "Modo de climatización al encender",
-            "variable_entity": "Regulada externamente cuando"
+            "variable_entity": "Regulada externamente cuando",
+            "load_type": "Tipo de carga"
           },
           "data_description": {
             "name": "Se muestra en el dispositivo de la carga.",
-            "entity_id": "Interruptor, input boolean o climatización que enciende y apaga la carga.",
+            "entity_id": "Interruptor, input boolean o climatización que enciende y apaga la carga. En una carga regulable, el interruptor que tiene delante: SolarSplit nunca lo conmuta y, mientras está apagado, la carga queda bloqueada.",
             "nominal_power": "Potencia que consume la carga encendida.",
-            "power_sensor": "Potencia medida de la carga. Si se indica, se usa en lugar de la nominal.",
+            "power_sensor": "Potencia medida de la carga. Si se indica, se usa en lugar de la nominal. Obligatorio en una carga regulable.",
             "priority": "La 1 se atiende primero.",
             "no_skip": "Solo se enciende si todas las cargas elegibles anteriores están encendidas.",
             "on_delay": "El excedente debe cubrir la carga durante este tiempo antes de encenderla.",
@@ -120,7 +121,32 @@
             "condition_state": "Estado que debe tener la entidad de condición de uso, por ejemplo on.",
             "respect_manual": "Si otro cambia la carga, SolarSplit deja de controlarla hasta que vuelva al estado que él puso.",
             "hvac_mode": "Solo para entidades de climatización.",
-            "variable_entity": "Mientras esta entidad esté encendida (por ejemplo FreeDS maestro), la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta."
+            "variable_entity": "Mientras esta entidad esté encendida (por ejemplo FreeDS maestro), la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta.",
+            "load_type": "Relé: SolarSplit la enciende y la apaga. Regulable: el dispositivo se regula solo (un derivador) y SolarSplit solo escribe su límite de potencia; rellena la sección Carga regulable."
+          },
+          "sections": {
+            "regulable": {
+              "name": "Carga regulable",
+              "description": "Solo para el tipo Regulable. Mientras la entidad de modo tiene el valor automático, el consumo de la carga es excedente: SolarSplit lo cuenta y escribe en la entidad de límite lo que dejan las cargas que van antes (su máximo si no hay ninguna). En cualquier otro modo su consumo es de red y la carga se muestra como externa.",
+              "data": {
+                "limit_entity": "Entidad de límite",
+                "mode_entity": "Entidad de modo",
+                "auto_state": "Valor del modo automático",
+                "limit_min": "Límite mínimo",
+                "limit_max": "Límite máximo",
+                "limit_threshold": "Cambio mínimo que se escribe",
+                "limit_interval": "Tiempo mínimo entre escrituras"
+              },
+              "data_description": {
+                "limit_entity": "Entidad numérica con la potencia máxima del dispositivo, por ejemplo la potencia máxima del derivador.",
+                "mode_entity": "Entidad con el modo del dispositivo.",
+                "auto_state": "Estado de la entidad de modo que significa automático, por ejemplo Auto.",
+                "limit_min": "SolarSplit nunca escribe menos.",
+                "limit_max": "SolarSplit nunca escribe más, y lo vuelve a escribir cuando deja de limitar la carga.",
+                "limit_threshold": "Un límite nuevo solo se escribe si cambia al menos esto, o si llega al mínimo o al máximo.",
+                "limit_interval": "Para no saturar el dispositivo con escrituras."
+              }
+            }
           }
         },
         "reconfigure": {
@@ -141,13 +167,14 @@
             "condition_state": "Estado de la condición de uso",
             "respect_manual": "Respetar cambios manuales",
             "hvac_mode": "Modo de climatización al encender",
-            "variable_entity": "Regulada externamente cuando"
+            "variable_entity": "Regulada externamente cuando",
+            "load_type": "Tipo de carga"
           },
           "data_description": {
             "name": "Se muestra en el dispositivo de la carga.",
-            "entity_id": "Interruptor, input boolean o climatización que enciende y apaga la carga.",
+            "entity_id": "Interruptor, input boolean o climatización que enciende y apaga la carga. En una carga regulable, el interruptor que tiene delante: SolarSplit nunca lo conmuta y, mientras está apagado, la carga queda bloqueada.",
             "nominal_power": "Potencia que consume la carga encendida.",
-            "power_sensor": "Potencia medida de la carga. Si se indica, se usa en lugar de la nominal.",
+            "power_sensor": "Potencia medida de la carga. Si se indica, se usa en lugar de la nominal. Obligatorio en una carga regulable.",
             "priority": "La 1 se atiende primero.",
             "no_skip": "Solo se enciende si todas las cargas elegibles anteriores están encendidas.",
             "on_delay": "El excedente debe cubrir la carga durante este tiempo antes de encenderla.",
@@ -159,12 +186,39 @@
             "condition_state": "Estado que debe tener la entidad de condición de uso, por ejemplo on.",
             "respect_manual": "Si otro cambia la carga, SolarSplit deja de controlarla hasta que vuelva al estado que él puso.",
             "hvac_mode": "Solo para entidades de climatización.",
-            "variable_entity": "Mientras esta entidad esté encendida (por ejemplo FreeDS maestro), la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta."
+            "variable_entity": "Mientras esta entidad esté encendida (por ejemplo FreeDS maestro), la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta.",
+            "load_type": "Relé: SolarSplit la enciende y la apaga. Regulable: el dispositivo se regula solo (un derivador) y SolarSplit solo escribe su límite de potencia; rellena la sección Carga regulable."
+          },
+          "sections": {
+            "regulable": {
+              "name": "Carga regulable",
+              "description": "Solo para el tipo Regulable. Mientras la entidad de modo tiene el valor automático, el consumo de la carga es excedente: SolarSplit lo cuenta y escribe en la entidad de límite lo que dejan las cargas que van antes (su máximo si no hay ninguna). En cualquier otro modo su consumo es de red y la carga se muestra como externa.",
+              "data": {
+                "limit_entity": "Entidad de límite",
+                "mode_entity": "Entidad de modo",
+                "auto_state": "Valor del modo automático",
+                "limit_min": "Límite mínimo",
+                "limit_max": "Límite máximo",
+                "limit_threshold": "Cambio mínimo que se escribe",
+                "limit_interval": "Tiempo mínimo entre escrituras"
+              },
+              "data_description": {
+                "limit_entity": "Entidad numérica con la potencia máxima del dispositivo, por ejemplo la potencia máxima del derivador.",
+                "mode_entity": "Entidad con el modo del dispositivo.",
+                "auto_state": "Estado de la entidad de modo que significa automático, por ejemplo Auto.",
+                "limit_min": "SolarSplit nunca escribe menos.",
+                "limit_max": "SolarSplit nunca escribe más, y lo vuelve a escribir cuando deja de limitar la carga.",
+                "limit_threshold": "Un límite nuevo solo se escribe si cambia al menos esto, o si llega al mínimo o al máximo.",
+                "limit_interval": "Para no saturar el dispositivo con escrituras."
+              }
+            }
           }
         }
       },
       "error": {
-        "entity_in_use": "Esta entidad ya pertenece a otra carga."
+        "entity_in_use": "Esta entidad ya pertenece a otra carga.",
+        "regulable_incomplete": "Una carga regulable necesita un sensor de potencia, una entidad de límite y una entidad de modo.",
+        "limit_range": "El límite mínimo debe ser menor que el máximo."
       }
     }
   },
@@ -177,6 +231,12 @@
         "fan_only": "Solo ventilador",
         "heat_cool": "Frío/calor",
         "auto": "Automático"
+      }
+    },
+    "load_type": {
+      "options": {
+        "relay": "Relé",
+        "regulable": "Regulable"
       }
     }
   },
@@ -213,7 +273,8 @@
           "blocked": "Bloqueada",
           "manual": "Manual",
           "unmanaged": "No gestionada",
-          "unavailable": "No disponible"
+          "unavailable": "No disponible",
+          "external": "Externa"
         }
       },
       "load_reason": {
@@ -240,7 +301,10 @@
           "mode_unknown": "Entidad de inyección cero desconocida",
           "global_unknown": "Condición global desconocida",
           "condition_unknown": "Condición de uso desconocida",
-          "switched_off": "Apagada desde fuera"
+          "switched_off": "Apagada desde fuera",
+          "external": "Regulada por el dispositivo fuera de su modo automático",
+          "full_power": "Potencia máxima: nada por delante",
+          "limited": "Limitada a lo que dejan las cargas anteriores"
         }
       }
     },

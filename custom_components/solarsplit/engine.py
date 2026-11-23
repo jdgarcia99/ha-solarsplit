@@ -15,6 +15,7 @@ class LoadKind(StrEnum):
 
     RELAY = "relay"  # switched on and off by the engine
     VARIABLE = "variable"  # regulated elsewhere (FreeDS); only its consumption counts
+    REGULABLE = "regulable"  # regulates itself; the engine sets its power limit
 
 
 class Action(StrEnum):
@@ -53,6 +54,9 @@ class Reason(StrEnum):
     SWITCHED_OFF = "switched_off"  # switched off by something else: never switched back on
     GLOBAL_UNKNOWN = "global_unknown"
     CONDITION_UNKNOWN = "condition_unknown"
+    EXTERNAL = "external"  # a regulable load outside its automatic mode: grid power, not ours
+    FULL_POWER = "full_power"  # a regulable load with nothing ahead of it: limit at its maximum
+    LIMITED = "limited"  # a regulable load limited to what the loads ahead of it leave
 
 
 @dataclass(frozen=True)
@@ -71,6 +75,20 @@ class EngineConfig:
     on_margin: float = 100  # W, extra budget needed to switch a load on
     import_tolerance: float = 150  # W, deficit tolerated before switching a load off
     settle_time: float = 30  # s
+
+
+@dataclass(frozen=True)
+class Regulator:
+    """The power limit of a regulable load (for example a diverter's maximum power)."""
+
+    auto: bool  # the device is in its automatic mode: its power is surplus, and ours to limit
+    current: float  # W, limit the device has now
+    minimum: float  # W
+    maximum: float  # W
+    threshold: float = 100  # W, smallest change worth writing (bounds are always written)
+    interval: float = 30  # s, minimum time between two writes
+    written: float | None = None  # time of the last write
+    lowered: bool = False  # SolarSplit set it below its maximum and has not restored it since
 
 
 @dataclass(frozen=True)
@@ -103,13 +121,14 @@ class LoadState:
     # them and passes them back in the next cycle.
     on_since: float | None = None
     off_since: float | None = None
+    regulator: Regulator | None = None  # only for regulable loads
 
     @property
     def consumption(self) -> float:
         """Power drawn now: measured if possible, else nominal while on."""
         if self.actual_w is not None:
             return max(self.actual_w, 0.0)
-        if self.kind is LoadKind.VARIABLE:
+        if self.kind is not LoadKind.RELAY:
             return 0.0
         return self.nominal_w if self.is_on else 0.0
 
@@ -123,6 +142,7 @@ class LoadState:
         return (
             self.managed and self.available and not self.manual and not self.switched_off
             and ((self.global_ok is True and self.eligible is not None) or self.shutdown)
+            and (self.regulator is None or self.regulator.auto)
         )
 
     @property
@@ -143,11 +163,39 @@ class Decision:
     reasons: dict[str, Reason] = field(default_factory=dict)
     on_since: dict[str, float] = field(default_factory=dict)  # loads whose switch-on condition holds
     off_since: dict[str, float] = field(default_factory=dict)  # loads whose switch-off condition holds
+    limits: dict[str, float] = field(default_factory=dict)  # W, limit each regulable load should have
+    writes: dict[str, float] = field(default_factory=dict)  # W, limits to write in this cycle
 
 
 def _since(previous: float | None, now: float) -> float:
     """Start of the current uninterrupted run of a condition that holds now."""
     return now if previous is None else previous
+
+
+def _limit_writes(now: float, loads: list[LoadState], limits: dict[str, float]) -> dict[str, float]:
+    """Limits worth writing now, so the device is not flooded.
+
+    A target is written when it moves by the threshold or reaches a bound, and no
+    sooner than the interval after the last write. A regulable load SolarSplit no
+    longer limits (paused, not managed, outside its automatic mode…) gets its
+    maximum back at once, but only if SolarSplit lowered it.
+    """
+    writes: dict[str, float] = {}
+    for load in loads:
+        if (reg := load.regulator) is None or not load.available:
+            continue
+        if (target := limits.get(load.id)) is None:
+            if reg.lowered:
+                writes[load.id] = reg.maximum
+            continue
+        change = abs(target - reg.current)
+        bound = target in (reg.minimum, reg.maximum)
+        if change < 1 or (change < reg.threshold and not bound):
+            continue
+        if reg.written is not None and now - reg.written < reg.interval:
+            continue
+        writes[load.id] = target
+    return writes
 
 
 def compute_budget(meas: Measurements | None, loads: list[LoadState], cfg: EngineConfig) -> float | None:
@@ -174,14 +222,16 @@ def decide(
     """
     budget = compute_budget(meas, loads, cfg)
     if not active:
-        return Decision(budget, reason=pause_reason)
+        return Decision(budget, reason=pause_reason, writes=_limit_writes(now, loads, {}))
     if budget is None:
         return Decision(budget, reason=Reason.GRID_UNKNOWN)
 
     desired: dict[str, bool] = {}
     reasons: dict[str, Reason] = {}
+    limits: dict[str, float] = {}
     remaining = budget
     gap = False  # an eligible relay load before this one was left off
+    claimed = False  # a load before this one uses, or is about to use, part of the budget
 
     for load in sorted(loads, key=lambda load: (load.priority, load.id)):
         if not load.managed:
@@ -192,6 +242,9 @@ def decide(
             continue
         if load.switched_off:
             reasons[load.id] = Reason.SWITCHED_OFF
+            continue
+        if load.regulator is not None and not load.regulator.auto:
+            reasons[load.id] = Reason.EXTERNAL
             continue
         if load.manual:
             reasons[load.id] = Reason.MANUAL
@@ -211,7 +264,20 @@ def decide(
             continue
         if load.kind is LoadKind.VARIABLE:
             remaining -= load.consumption
+            claimed = claimed or load.consumption > 0
             reasons[load.id] = Reason.VARIABLE
+            continue
+        if (reg := load.regulator) is not None:
+            # Its consumption is in the budget, so `remaining` is what it may take.
+            if not load.eligible:
+                limits[load.id], reasons[load.id] = reg.minimum, Reason.NOT_ELIGIBLE
+            elif claimed:
+                limits[load.id] = min(max(remaining, reg.minimum), reg.maximum)
+                reasons[load.id] = Reason.LIMITED if limits[load.id] < reg.maximum else Reason.FULL_POWER
+            else:
+                limits[load.id], reasons[load.id] = reg.maximum, Reason.FULL_POWER
+            remaining -= load.consumption
+            claimed = claimed or load.consumption > 0
             continue
         if not load.eligible:
             desired[load.id] = False
@@ -230,6 +296,7 @@ def decide(
         desired[load.id] = fits
         if fits:
             remaining -= power
+            claimed = True
             reasons[load.id] = Reason.FITS
         else:
             reasons[load.id] = Reason.NO_BUDGET
@@ -250,7 +317,10 @@ def decide(
 
     def result(action: Action = Action.NONE, load_id: str | None = None,
                reason: Reason = Reason.STEADY) -> Decision:
-        return Decision(budget, action, load_id, reason, desired, reasons, on_since, off_since)
+        return Decision(
+            budget, action, load_id, reason, desired, reasons, on_since, off_since,
+            limits, _limit_writes(now, loads, limits),
+        )
 
     if not offs and not ons:
         return result()

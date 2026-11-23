@@ -15,9 +15,11 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_NAME, UnitOfPower, UnitOfTime
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import section
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_AUTO_STATE,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
     CONF_CYCLE_INTERVAL,
@@ -26,9 +28,16 @@ from .const import (
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
     CONF_IMPORT_TOLERANCE,
+    CONF_LIMIT_ENTITY,
+    CONF_LIMIT_INTERVAL,
+    CONF_LIMIT_MAX,
+    CONF_LIMIT_MIN,
+    CONF_LIMIT_THRESHOLD,
     CONF_LOAD_ENTITY,
+    CONF_LOAD_TYPE,
     CONF_MIN_OFF,
     CONF_MIN_ON,
+    CONF_MODE_ENTITY,
     CONF_NO_SKIP,
     CONF_NOMINAL_POWER,
     CONF_OFF_DELAY,
@@ -49,8 +58,11 @@ from .const import (
     DOMAIN,
     HVAC_MODES,
     LOAD_DOMAINS,
+    LOAD_TYPE_REGULABLE,
+    LOAD_TYPES,
     MAX_CYCLE_INTERVAL,
     MIN_CYCLE_INTERVAL,
+    SECTION_REGULABLE,
     SUBENTRY_LOAD,
 )
 from .settings import DEFAULTS, LOAD_DEFAULTS, get_settings
@@ -62,6 +74,11 @@ BOOLEAN_ENTITY = selector.EntitySelector(
     selector.EntitySelectorConfig(domain=["input_boolean", "binary_sensor", "switch"])
 )
 LOAD_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=LOAD_DOMAINS))
+LIMIT_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=["number", "input_number"]))
+MODE_ENTITY = selector.EntitySelector(
+    selector.EntitySelectorConfig(domain=["select", "input_select", "switch", "input_boolean"])
+)
+SECTIONS = (SECTION_REGULABLE,)
 OPTIONAL_ENTITIES = (CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION)
 
 
@@ -114,9 +131,23 @@ def load_schema(values: dict[str, Any]) -> vol.Schema:
     def required(key: str) -> vol.Required:
         return vol.Required(key, default=values.get(key, vol.UNDEFINED))
 
+    regulable = vol.Schema(
+        {
+            _optional(CONF_LIMIT_ENTITY, values): LIMIT_ENTITY,
+            _optional(CONF_MODE_ENTITY, values): MODE_ENTITY,
+            required(CONF_AUTO_STATE): selector.TextSelector(),
+            required(CONF_LIMIT_MIN): _number(0, 20000, UnitOfPower.WATT),
+            required(CONF_LIMIT_MAX): _number(0, 20000, UnitOfPower.WATT),
+            required(CONF_LIMIT_THRESHOLD): _number(0, 2000, UnitOfPower.WATT),
+            required(CONF_LIMIT_INTERVAL): _number(0, 3600, UnitOfTime.SECONDS),
+        }
+    )
     return vol.Schema(
         {
             required(CONF_NAME): selector.TextSelector(),
+            required(CONF_LOAD_TYPE): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=LOAD_TYPES, translation_key=CONF_LOAD_TYPE)
+            ),
             required(CONF_LOAD_ENTITY): LOAD_ENTITY,
             required(CONF_NOMINAL_POWER): _number(1, 20000, UnitOfPower.WATT),
             _optional(CONF_POWER_SENSOR, values): POWER_SENSOR,
@@ -134,8 +165,19 @@ def load_schema(values: dict[str, Any]) -> vol.Schema:
                 selector.SelectSelectorConfig(options=HVAC_MODES, translation_key=CONF_HVAC_MODE)
             ),
             _optional(CONF_VARIABLE_ENTITY, values): BOOLEAN_ENTITY,
+            vol.Optional(SECTION_REGULABLE, default={}): section(
+                regulable, {"collapsed": values[CONF_LOAD_TYPE] != LOAD_TYPE_REGULABLE}
+            ),
         }
     )
+
+
+def flatten(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Store the fields of the form's sections at the top level of the load's data."""
+    data = {key: value for key, value in user_input.items() if key not in SECTIONS}
+    for key in SECTIONS:
+        data.update(user_input.get(key, {}))
+    return data
 
 
 class SolarSplitConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -186,31 +228,38 @@ class LoadSubentryFlow(ConfigSubentryFlow):
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """Add a load."""
-        errors = self._validate(user_input, None)
+        data = flatten(user_input or {})
+        errors = self._validate(user_input and data, None)
         if user_input is not None and not errors:
             return self.async_create_entry(
-                title=user_input[CONF_NAME], data=user_input, unique_id=user_input[CONF_LOAD_ENTITY]
+                title=data[CONF_NAME], data=data, unique_id=data[CONF_LOAD_ENTITY]
             )
-        values = {**LOAD_DEFAULTS, **(user_input or {})}
+        values = {**LOAD_DEFAULTS, **data}
         return self.async_show_form(step_id="user", data_schema=load_schema(values), errors=errors)
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """Edit a load."""
         subentry = self._get_reconfigure_subentry()
-        errors = self._validate(user_input, subentry.subentry_id)
+        data = flatten(user_input or {})
+        errors = self._validate(user_input and data, subentry.subentry_id)
         if user_input is not None and not errors:
             return self.async_update_and_abort(
-                self._get_entry(), subentry, title=user_input[CONF_NAME],
-                data=user_input, unique_id=user_input[CONF_LOAD_ENTITY],
+                self._get_entry(), subentry, title=data[CONF_NAME],
+                data=data, unique_id=data[CONF_LOAD_ENTITY],
             )
-        values = {**LOAD_DEFAULTS, **subentry.data, **(user_input or {})}
+        values = {**LOAD_DEFAULTS, **subentry.data, **data}
         return self.async_show_form(step_id="reconfigure", data_schema=load_schema(values), errors=errors)
 
-    def _validate(self, user_input: dict[str, Any] | None, own_id: str | None) -> dict[str, str]:
-        """An entity can belong to one load only."""
-        if user_input is None:
+    def _validate(self, data: dict[str, Any] | None, own_id: str | None) -> dict[str, str]:
+        """An entity belongs to one load only; a regulable load needs its entities and a valid range."""
+        if not data:
             return {}
         for subentry in self._get_entry().subentries.values():
-            if subentry.subentry_id != own_id and subentry.unique_id == user_input[CONF_LOAD_ENTITY]:
+            if subentry.subentry_id != own_id and subentry.unique_id == data[CONF_LOAD_ENTITY]:
                 return {CONF_LOAD_ENTITY: "entity_in_use"}
+        if data[CONF_LOAD_TYPE] == LOAD_TYPE_REGULABLE:
+            if not all(data.get(key) for key in (CONF_POWER_SENSOR, CONF_LIMIT_ENTITY, CONF_MODE_ENTITY)):
+                return {"base": "regulable_incomplete"}
+            if data[CONF_LIMIT_MIN] >= data[CONF_LIMIT_MAX]:
+                return {"base": "limit_range"}
         return {}

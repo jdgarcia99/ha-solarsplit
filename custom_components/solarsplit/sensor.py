@@ -119,8 +119,11 @@ class LoadStateSensor(LoadSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Power counted for the load."""
-        return {"power": round(self.view.power)}
+        """Power counted for the load and, for a regulable load, the limit it should have."""
+        attributes: dict[str, Any] = {"power": round(self.view.power)}
+        if self.load.regulable:
+            attributes["limit"] = None if self.view.limit is None else round(self.view.limit)
+        return attributes
 
 
 class LoadReasonSensor(LoadSensor):

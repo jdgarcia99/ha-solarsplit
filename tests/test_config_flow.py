@@ -8,20 +8,32 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.solarsplit import get_settings, load_settings
 from custom_components.solarsplit.const import (
+    CONF_AUTO_STATE,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
     CONF_IMPORT_SENSOR,
+    CONF_LIMIT_ENTITY,
+    CONF_LIMIT_MAX,
+    CONF_LIMIT_MIN,
+    CONF_LIMIT_THRESHOLD,
     CONF_LOAD_ENTITY,
+    CONF_LOAD_TYPE,
+    CONF_MODE_ENTITY,
     CONF_NOMINAL_POWER,
     CONF_POWER_SENSOR,
     CONF_PRIORITY,
     CONF_RESPECT_MANUAL,
     CONF_SAFETY_MARGIN,
     CONF_STALE_TIMEOUT,
+    DEFAULT_AUTO_STATE,
+    DEFAULT_LIMIT_THRESHOLD,
     DEFAULT_PRIORITY,
     DEFAULT_SAFETY_MARGIN,
     DEFAULT_STALE_TIMEOUT,
     DOMAIN,
+    LOAD_TYPE_REGULABLE,
+    LOAD_TYPE_RELAY,
+    SECTION_REGULABLE,
     SUBENTRY_LOAD,
 )
 
@@ -122,3 +134,49 @@ async def test_reconfigure_load(hass: HomeAssistant) -> None:
     settings = load_settings(subentry)
     assert settings[CONF_PRIORITY] == 1
     assert settings[CONF_POWER_SENSOR] is None  # cleared
+
+
+TERMO = {
+    CONF_NAME: "Termo",
+    CONF_LOAD_TYPE: LOAD_TYPE_REGULABLE,
+    CONF_LOAD_ENTITY: "switch.termo",
+    CONF_NOMINAL_POWER: 1600,
+    CONF_POWER_SENSOR: "sensor.termo_power",
+}
+REGULABLE = {
+    CONF_LIMIT_ENTITY: "number.coladuria_x10_derivador_potencia_maxima",
+    CONF_MODE_ENTITY: "select.coladuria_x10_derivador_modo",
+    CONF_LIMIT_MAX: 1600,
+}
+
+
+async def test_add_regulable_load(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    result = await _add_load(hass, entry, {**TERMO, SECTION_REGULABLE: REGULABLE})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (subentry,) = entry.subentries.values()
+    assert SECTION_REGULABLE not in subentry.data  # stored flat
+    settings = load_settings(subentry)
+    assert settings[CONF_LIMIT_ENTITY] == "number.coladuria_x10_derivador_potencia_maxima"
+    assert settings[CONF_LIMIT_MAX] == 1600
+    assert settings[CONF_AUTO_STATE] == DEFAULT_AUTO_STATE
+    assert settings[CONF_LIMIT_THRESHOLD] == DEFAULT_LIMIT_THRESHOLD
+
+
+async def test_regulable_load_needs_its_entities(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    result = await _add_load(hass, entry, {**TERMO, SECTION_REGULABLE: {CONF_MODE_ENTITY: "select.modo"}})
+    assert result["errors"] == {"base": "regulable_incomplete"}
+    no_power = {k: v for k, v in TERMO.items() if k != CONF_POWER_SENSOR}
+    result = await _add_load(hass, entry, {**no_power, SECTION_REGULABLE: REGULABLE})
+    assert result["errors"] == {"base": "regulable_incomplete"}
+    result = await _add_load(hass, entry, {**TERMO, SECTION_REGULABLE: {**REGULABLE, CONF_LIMIT_MIN: 1600}})
+    assert result["errors"] == {"base": "limit_range"}
+
+
+async def test_relay_load_ignores_the_regulable_section(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    result = await _add_load(hass, entry, LOAD)
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (subentry,) = entry.subentries.values()
+    assert load_settings(subentry)[CONF_LOAD_TYPE] == LOAD_TYPE_RELAY

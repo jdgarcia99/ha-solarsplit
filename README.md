@@ -21,7 +21,7 @@ budget = export − import + power of the managed loads that are on − safety m
 
 Power already used by managed loads is added back, because it can be reassigned. Loads are then walked in priority order: each one enters if it fits in what is left of the budget. The engine compares the desired and the real states and makes a single change: switch-offs first (lowest priority first), then switch-ons (highest priority first), always respecting the settle time and each load's minimum on and off times.
 
-A load only switches on after the surplus has covered it for its switch-on delay, and only switches off after the deficit has lasted its switch-off delay. Loads regulated elsewhere (FreeDS) are never switched but their power counts. If someone else switches a load, SolarSplit stops controlling it until it returns to the state SolarSplit set. A load that something else switches **off** (a safety cut, a person, an automation) is `blocked` with reason `switched_off`: SolarSplit never switches it back on, whatever *Respect manual changes* says, until it is on again or its **Manage** switch is turned off and on. This is not detected in shadow mode, where every switch-off comes from your automations.
+A load only switches on after the surplus has covered it for its switch-on delay, and only switches off after the deficit has lasted its switch-off delay. Loads regulated elsewhere are never switched but their power counts; [regulable loads](#regulable-loads), such as a water heater behind a diverter, get a power limit instead. If someone else switches a load, SolarSplit stops controlling it until it returns to the state SolarSplit set. A load that something else switches **off** (a safety cut, a person, an automation) is `blocked` with reason `switched_off`: SolarSplit never switches it back on, whatever *Respect manual changes* says, until it is on again or its **Manage** switch is turned off and on. This is not detected in shadow mode, where every switch-off comes from your automations.
 
 When the global condition goes off, SolarSplit switches off the loads it switched on itself and that respect the condition (respecting their minimum on time); loads switched by hand and loads that ignore the condition are left alone. Turning the master switch off, instead, leaves every load as it is.
 
@@ -162,9 +162,10 @@ Each load is a subentry: on the integration's page, use **Add load**, and edit o
 | Setting | Default | Description |
 | --- | --- | --- |
 | Name | — | Shown on the load's device. |
-| Entity | — | `switch`, `input_boolean` or `climate` entity that turns the load on and off. |
+| Load type | relay | **Relay**: switched on and off. **Regulable**: regulates itself (a diverter); SolarSplit only writes its power limit. See [Regulable loads](#regulable-loads). |
+| Entity | — | `switch`, `input_boolean` or `climate` entity that turns the load on and off. For a regulable load, the switch in front of it: never switched by SolarSplit; while it is off the load is blocked. |
 | Nominal power | — | Power drawn when on (W). |
-| Power sensor | none | Measured power; used instead of the nominal power when set. |
+| Power sensor | none | Measured power; used instead of the nominal power when set. Required for a regulable load. |
 | Priority | 10 | 1 is served first. |
 | Do not skip | off | Only switch on when every eligible load before it is on. |
 | Switch-on delay | 60 s | The surplus must cover the load this long before it is switched on. |
@@ -174,7 +175,34 @@ Each load is a subentry: on the integration's page, use **Add load**, and edit o
 | Usage condition entity / state | none / `on` | The load is only used while that entity has that state. |
 | Respect manual changes | on | If someone else switches the load, stop controlling it until it returns to the state SolarSplit set. |
 | Climate mode when on | cool | For `climate` entities. |
-| Regulated externally when | none | While this entity is on (for example FreeDS master), the load is never switched but its power counts. |
+| Regulated externally when | none | Relay loads only. While this entity is on, the load is never switched but its power counts. |
+
+The **Regulable load** section of the form (collapsed unless the type is Regulable):
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Limit entity | — | `number` or `input_number` with the device's maximum power. |
+| Mode entity | — | `select`, `input_select`, `switch` or `input_boolean` with the device's mode. |
+| Automatic mode value | `Auto` | State of the mode entity that means automatic. |
+| Minimum / maximum limit | 0 / 2000 W | SolarSplit never writes outside this range, and writes the maximum back when it stops limiting the load. |
+| Smallest change written | 100 W | A new limit is written only if it moves by at least this much, or reaches the minimum or maximum. |
+| Minimum time between writes | 30 s | So the device is not flooded with writes. |
+
+### Regulable loads
+
+A regulable load regulates its own power, like a diverter that sends the surplus to a water heater. SolarSplit never switches it; it reads its power and writes its power limit.
+
+- **Automatic mode** (the mode entity has the automatic value): the load's measured power is surplus. It counts in the budget like any managed load, and the load takes its turn in the priority walk:
+  - If nothing ahead of it uses or is about to use the budget (it has the highest priority, or the loads ahead are off and stay off), its limit is its **maximum** (reason `full_power`).
+  - Otherwise its limit is what the loads ahead leave, within the minimum and maximum (reason `limited`). The limit is rounded down to the entity's step.
+  - With its usage condition off, its limit is the minimum (`not_eligible`).
+  - Loads after it get what it does not use.
+- **Any other mode** (Manual, Off…): its power is grid power. It is not reassigned and the load is shown as `external`.
+- **Its switch off** (a safety cut, for example): `blocked` with reason `switched_off`.
+- **Giving it back:** when SolarSplit stops limiting a load it lowered (master switch off, Manage off, other mode, global condition off, integration unloaded or disabled), it writes the maximum back at once.
+- If its power, limit or mode cannot be read, it is `unavailable` and nothing is written.
+
+The State sensor of a regulable load has a `limit` attribute with the limit it should have. In shadow mode nothing is written; the attribute shows what would be. Limit writes do not count as the cycle's one switching action.
 
 ## License
 

@@ -9,6 +9,7 @@ from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_mock_service,
@@ -20,12 +21,17 @@ from custom_components.solarsplit.const import (
     CONF_GLOBAL_CONDITION,
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
+    CONF_LIMIT_ENTITY,
+    CONF_LIMIT_MAX,
     CONF_LOAD_ENTITY,
+    CONF_LOAD_TYPE,
     CONF_MIN_OFF,
     CONF_MIN_ON,
+    CONF_MODE_ENTITY,
     CONF_NOMINAL_POWER,
     CONF_OFF_DELAY,
     CONF_ON_DELAY,
+    CONF_POWER_SENSOR,
     CONF_PRIORITY,
     CONF_RESPECT_GLOBAL,
     CONF_RESPECT_MANUAL,
@@ -35,6 +41,7 @@ from custom_components.solarsplit.const import (
     CONF_STALE_TIMEOUT,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
+    LOAD_TYPE_REGULABLE,
     SUBENTRY_LOAD,
 )
 
@@ -481,3 +488,136 @@ async def test_shadow_mode_does_not_block(hass: HomeAssistant) -> None:
     hass.states.async_set(POOL, "off")  # the old automation switches it off
     await _cycle(hass, entry, export=1000)
     assert _state(hass, entry, "load_reason", POOL) == "fits"
+
+
+TERMO = "switch.termo"
+TERMO_POWER = "sensor.termo_power"
+LIMIT = "number.derivador_potencia_maxima"
+MODE = "select.derivador_modo"
+
+
+def _termo(priority: int = 2, **extra: Any) -> dict[str, Any]:
+    return _load(
+        "Termo", TERMO, 1600, priority,
+        **{CONF_LOAD_TYPE: LOAD_TYPE_REGULABLE, CONF_POWER_SENSOR: TERMO_POWER, CONF_LIMIT_ENTITY: LIMIT,
+           CONF_MODE_ENTITY: MODE, CONF_LIMIT_MAX: 1600, **extra},
+    )
+
+
+async def _setup_termo(
+    hass: HomeAssistant, shadow: bool = False, power: float = 1200, limit: float = 1600, mode: str = "Auto",
+    loads: list | None = None,
+) -> tuple[MockConfigEntry, list]:
+    hass.states.async_set(TERMO, "on")
+    hass.states.async_set(TERMO_POWER, str(power), {"unit_of_measurement": "W"})
+    hass.states.async_set(LIMIT, str(limit), {"min": 0, "max": 3500, "step": 50})
+    hass.states.async_set(MODE, mode, {"options": ["Apagado", "Auto", "Manual"]})
+    entry = await _setup(hass, shadow=shadow, loads=loads or [_load("Pool", POOL, 750, 1), _termo()])
+    return entry, async_mock_service(hass, "number", "set_value")
+
+
+def _limits(calls: list) -> list[tuple[str, float]]:
+    return [(c.data["entity_id"], c.data["value"]) for c in calls]
+
+
+def _attr(hass: HomeAssistant, entry: MockConfigEntry, entity: str, attribute: str) -> Any:
+    return hass.states.get(_entity(hass, f"{_sub_id(entry, entity)}_load_state")).attributes[attribute]
+
+
+async def test_regulable_gets_what_the_loads_ahead_leave(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    entry, calls = await _setup_termo(hass)
+    async_mock_service(hass, "switch", "turn_on")
+    # Budget 80 + 1200 - 100 = 1180: the pool (750) comes first, the heater keeps 430 (written as 400)
+    await _cycle(hass, entry, export=80)
+    assert _limits(calls) == [(LIMIT, 400)]
+    assert _state(hass, entry, "load_reason", TERMO) == "limited"
+    assert _state(hass, entry, "load_state", TERMO) == "on"
+    assert _attr(hass, entry, TERMO, "limit") == 430
+    assert entry.runtime_data.memory[_sid(TERMO)].lowered is True
+
+    hass.states.async_set(POOL, "on")
+    hass.states.async_set(LIMIT, "400", {"min": 0, "max": 3500, "step": 50})
+    hass.states.async_set(TERMO_POWER, "400", {"unit_of_measurement": "W"})
+    await _cycle(hass, entry, export=0, imp=0)  # 300 left: too soon after the last write
+    freezer.tick(timedelta(seconds=10))
+    await _cycle(hass, entry, export=0, imp=200)  # 100 left: big enough, but too soon
+    assert len(calls) == 1
+    freezer.tick(timedelta(seconds=20))
+    await _cycle(hass, entry, export=0, imp=200)
+    assert _limits(calls)[1:] == [(LIMIT, 100)]
+
+
+async def test_regulable_first_in_line_stays_at_its_maximum(hass: HomeAssistant) -> None:
+    entry, calls = await _setup_termo(hass, loads=[_termo(priority=1), _load("Pool", POOL, 750, 2)])
+    await _cycle(hass, entry, export=50)
+    assert _state(hass, entry, "load_reason", TERMO) == "full_power"
+    assert _state(hass, entry, "load_reason", POOL) == "no_budget"  # the heater takes the surplus
+    assert calls == []
+
+
+async def test_regulable_in_shadow_mode_only_publishes(hass: HomeAssistant) -> None:
+    entry, calls = await _setup_termo(hass, shadow=True)
+    await _cycle(hass, entry, export=80)
+    assert _attr(hass, entry, TERMO, "limit") == 430
+    assert calls == []
+
+
+@pytest.mark.parametrize("mode", ["Manual", "Apagado"])
+async def test_regulable_outside_auto_is_external(hass: HomeAssistant, mode: str) -> None:
+    entry, calls = await _setup_termo(hass, mode=mode, power=1600)
+    await _cycle(hass, entry, export=0, imp=1600)
+    assert _state(hass, entry, "load_state", TERMO) == "external"
+    assert _state(hass, entry, "load_reason", TERMO) == "external"
+    assert float(_state(hass, entry, "budget")) == -1700  # its power is grid power, not reassigned
+    assert calls == []  # SolarSplit never lowered it: nothing to give back
+
+
+async def _lowered_termo(hass: HomeAssistant) -> tuple[MockConfigEntry, list]:
+    entry, calls = await _setup_termo(hass, limit=400)
+    memory = entry.runtime_data.memory[_sid(TERMO)]
+    memory.lowered, memory.limit_written = True, dt_util.utcnow().timestamp()
+    return entry, calls
+
+
+async def test_regulable_limit_restored_outside_auto(hass: HomeAssistant) -> None:
+    entry, calls = await _lowered_termo(hass)
+    hass.states.async_set(MODE, "Manual", {"options": ["Apagado", "Auto", "Manual"]})
+    await _cycle(hass, entry, export=0)
+    assert _limits(calls) == [(LIMIT, 1600)]
+    assert entry.runtime_data.memory[_sid(TERMO)].lowered is False
+    await _cycle(hass, entry, export=0)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("switch", ["active", "managed"])
+async def test_regulable_limit_restored_by_the_switches(hass: HomeAssistant, switch: str) -> None:
+    _, calls = await _lowered_termo(hass)
+    unique = f"{ENTRY_ID}_active" if switch == "active" else f"{_sid(TERMO)}_managed"
+    await hass.services.async_call("switch", "turn_off", {"entity_id": _entity(hass, unique, "switch")}, blocking=True)
+    await hass.async_block_till_done()
+    assert _limits(calls) == [(LIMIT, 1600)]
+
+
+async def test_regulable_limit_restored_on_unload(hass: HomeAssistant) -> None:
+    entry, calls = await _lowered_termo(hass)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert _limits(calls) == [(LIMIT, 1600)]
+
+
+async def test_regulable_behind_a_cut_switch_is_blocked(hass: HomeAssistant) -> None:
+    entry, _ = await _setup_termo(hass, power=0)
+    switch_on = async_mock_service(hass, "switch", "turn_on")
+    hass.states.async_set(TERMO, "off")  # the Shelly's safety cut
+    await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_state", TERMO) == "blocked"
+    assert _state(hass, entry, "load_reason", TERMO) == "switched_off"
+    assert [c.data["entity_id"] for c in switch_on] == [POOL]  # never the heater
+
+
+@pytest.mark.parametrize("entity", [TERMO_POWER, LIMIT, MODE])
+async def test_regulable_with_unknown_data_is_left_alone(hass: HomeAssistant, entity: str) -> None:
+    entry, calls = await _lowered_termo(hass)
+    hass.states.async_set(entity, STATE_UNAVAILABLE)
+    await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_state", TERMO) == "unavailable"
+    assert calls == []

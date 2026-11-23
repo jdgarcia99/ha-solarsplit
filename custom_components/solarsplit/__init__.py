@@ -38,7 +38,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: SolarSplitConfigEntry) -
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: SolarSplitConfigEntry) -> bool:
-    """Unload a config entry, saving the loop's memory first so a reload finds it."""
+    """Unload a config entry: give regulable loads their maximum back and save the loop's memory."""
+    await entry.runtime_data.async_release_limits()
     await entry.runtime_data.async_save_memory()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 

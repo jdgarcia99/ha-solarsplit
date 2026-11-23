@@ -21,6 +21,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_AUTO_STATE,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
     CONF_CYCLE_INTERVAL,
@@ -29,9 +30,16 @@ from .const import (
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
     CONF_IMPORT_TOLERANCE,
+    CONF_LIMIT_ENTITY,
+    CONF_LIMIT_INTERVAL,
+    CONF_LIMIT_MAX,
+    CONF_LIMIT_MIN,
+    CONF_LIMIT_THRESHOLD,
     CONF_LOAD_ENTITY,
+    CONF_LOAD_TYPE,
     CONF_MIN_OFF,
     CONF_MIN_ON,
+    CONF_MODE_ENTITY,
     CONF_NO_SKIP,
     CONF_NOMINAL_POWER,
     CONF_OFF_DELAY,
@@ -49,6 +57,7 @@ from .const import (
     CONF_VARIABLE_ENTITY,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
+    LOAD_TYPE_REGULABLE,
 )
 from .engine import (
     Action,
@@ -58,13 +67,16 @@ from .engine import (
     LoadState,
     Measurements,
     Reason,
+    Regulator,
     decide,
 )
 from .loads import (
+    async_set_limit,
     async_switch_load,
     entity_has_state,
     entity_is_on,
     load_is_on,
+    read_number,
     read_watts,
 )
 from .settings import config_snapshot, get_settings, load_settings
@@ -87,7 +99,10 @@ LOAD_BLOCKED = "blocked"  # off, and not allowed to enter
 LOAD_MANUAL = "manual"
 LOAD_UNMANAGED = "unmanaged"
 LOAD_UNAVAILABLE = "unavailable"
-LOAD_STATES = [LOAD_ON, LOAD_OFF, LOAD_WAITING, LOAD_BLOCKED, LOAD_MANUAL, LOAD_UNMANAGED, LOAD_UNAVAILABLE]
+LOAD_EXTERNAL = "external"  # a regulable load outside its automatic mode
+LOAD_STATES = [
+    LOAD_ON, LOAD_OFF, LOAD_WAITING, LOAD_BLOCKED, LOAD_MANUAL, LOAD_UNMANAGED, LOAD_UNAVAILABLE, LOAD_EXTERNAL,
+]
 
 _BLOCKING = (
     Reason.NOT_ELIGIBLE, Reason.WAITING_HIGHER, Reason.NO_BUDGET, Reason.GLOBAL_CONDITION,
@@ -97,6 +112,7 @@ _STATE_FOR = {
     Reason.MANUAL: LOAD_MANUAL,
     Reason.UNMANAGED: LOAD_UNMANAGED,
     Reason.UNAVAILABLE: LOAD_UNAVAILABLE,
+    Reason.EXTERNAL: LOAD_EXTERNAL,
 }
 
 
@@ -121,6 +137,14 @@ class LoadConfig:
     respect_manual: bool
     hvac_mode: str
     variable_entity: str | None
+    regulable: bool = False
+    limit_entity: str | None = None
+    mode_entity: str | None = None
+    auto_state: str = ""
+    limit_min: float = 0  # W
+    limit_max: float = 0  # W
+    limit_threshold: float = 0  # W
+    limit_interval: float = 0  # s
 
     @classmethod
     def from_subentry(cls, subentry: ConfigSubentry) -> LoadConfig:
@@ -144,6 +168,14 @@ class LoadConfig:
             respect_manual=s[CONF_RESPECT_MANUAL],
             hvac_mode=s[CONF_HVAC_MODE],
             variable_entity=s[CONF_VARIABLE_ENTITY],
+            regulable=s[CONF_LOAD_TYPE] == LOAD_TYPE_REGULABLE,
+            limit_entity=s[CONF_LIMIT_ENTITY],
+            mode_entity=s[CONF_MODE_ENTITY],
+            auto_state=s[CONF_AUTO_STATE],
+            limit_min=float(s[CONF_LIMIT_MIN]),
+            limit_max=float(s[CONF_LIMIT_MAX]),
+            limit_threshold=float(s[CONF_LIMIT_THRESHOLD]),
+            limit_interval=float(s[CONF_LIMIT_INTERVAL]),
         )
 
 
@@ -158,6 +190,8 @@ class LoadMemory:
     last_seen: bool | None = None  # last usable on/off state observed
     last_change: float | None = None  # time of the last on/off transition observed
     switched_off: bool = False  # switched off by something else; cleared when it is on again
+    limit_written: float | None = None  # regulable: time SolarSplit last wrote the limit
+    lowered: bool = False  # regulable: SolarSplit set the limit below the maximum
 
     def observe(self, is_on: bool | None, state: State | None, detect_off: bool) -> None:
         """Track on/off transitions with our own clock, which survives restarts.
@@ -186,6 +220,7 @@ class LoadView:
     reason: Reason
     is_on: bool | None
     power: float
+    limit: float | None = None  # regulable: the limit it should have
 
 
 @dataclass(frozen=True)
@@ -348,24 +383,41 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         eligible = load.condition_entity is None or entity_has_state(
             self._state(load.condition_entity), load.condition_state
         )
-        variable = load.variable_entity is not None and entity_is_on(self._state(load.variable_entity))
         actual_w = read_watts(self._state(load.power_sensor))
-        # Unknown data is unknown, never 0 W: a variable load whose power or regulation
-        # entity cannot be read is left as it is.
-        available = is_on is not None and variable is not None and not (
-            variable and load.power_sensor is not None and actual_w is None
-        )
+        regulator = None
+        switched_off = memory.switched_off and not self.shadow and is_on is False
+        if load.regulable:
+            # SolarSplit never switches it: its switch only says whether it can draw power
+            # (off: a safety cut, for example). Its power must be known, never taken as 0 W.
+            kind = LoadKind.REGULABLE
+            auto = entity_has_state(self._state(load.mode_entity), load.auto_state)
+            current = read_number(self._state(load.limit_entity))
+            available = None not in (is_on, auto, current, actual_w)
+            regulator = Regulator(
+                auto=bool(auto), current=current or 0.0, minimum=load.limit_min, maximum=load.limit_max,
+                threshold=load.limit_threshold, interval=load.limit_interval,
+                written=memory.limit_written, lowered=memory.lowered,
+            )
+            manual, switched_off = False, is_on is False
+        else:
+            variable = load.variable_entity is not None and entity_is_on(self._state(load.variable_entity))
+            kind = LoadKind.VARIABLE if variable else LoadKind.RELAY
+            # Unknown data is unknown, never 0 W: a variable load whose power or regulation
+            # entity cannot be read is left as it is.
+            available = is_on is not None and variable is not None and not (
+                variable and load.power_sensor is not None and actual_w is None
+            )
         return LoadState(
             id=load.id,
             priority=load.priority,
             nominal_w=load.nominal_w,
             is_on=bool(is_on),
             actual_w=actual_w,
-            kind=LoadKind.VARIABLE if variable else LoadKind.RELAY,
+            kind=kind,
             managed=memory.managed,
             available=available,
             manual=manual,
-            switched_off=memory.switched_off and not self.shadow and is_on is False,
+            switched_off=switched_off,
             owned=owned,
             global_ok=True if not load.respect_global else global_on,
             eligible=eligible,
@@ -377,6 +429,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             last_change=memory.last_change,
             on_since=memory.on_since,
             off_since=memory.off_since,
+            regulator=regulator,
         )
 
     async def _async_update_data(self) -> CycleResult:
@@ -410,6 +463,9 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             memory.on_since = decision.on_since.get(load.id)
             memory.off_since = decision.off_since.get(load.id)
 
+        if not self.shadow:
+            for load_id, value in decision.writes.items():
+                await self._async_write_limit(self.load(load_id), value, now)
         if decision.action is not Action.NONE and not self.shadow:
             await self._async_execute(decision, now)
         self.save_memory()
@@ -435,6 +491,27 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.last_action = now
         _LOGGER.debug("Switched %s %s (budget %.0f W)", load.entity_id, "on" if on else "off", decision.budget)
 
+    async def _async_write_limit(self, load: LoadConfig, value: float, now: float) -> None:
+        """Write a regulable load's power limit and remember it."""
+        try:
+            written = await async_set_limit(self.hass, load.limit_entity, value)
+        except HomeAssistantError as err:
+            _LOGGER.warning("Could not set the limit of %s to %.0f W: %s", load.limit_entity, value, err)
+            return
+        memory = self.memory[load.id]
+        memory.limit_written = now
+        memory.lowered = written < load.limit_max
+        _LOGGER.debug("Set the limit of %s to %.0f W", load.limit_entity, written)
+
+    async def async_release_limits(self) -> None:
+        """Give every regulable load SolarSplit lowered its maximum back (on unload)."""
+        if self.shadow:
+            return
+        now = dt_util.utcnow().timestamp()
+        for load in self.loads:
+            if load.regulable and self.memory[load.id].lowered:
+                await self._async_write_limit(load, load.limit_max, now)
+
     @staticmethod
     def _view(state: LoadState, decision: Decision) -> LoadView:
         """Summarise a load for its state and reason entities."""
@@ -449,7 +526,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             shown = LOAD_BLOCKED
         else:
             shown = LOAD_ON if state.is_on else LOAD_OFF
-        return LoadView(shown, reason, state.is_on if state.available else None, state.consumption)
+        return LoadView(
+            shown, reason, state.is_on if state.available else None, state.consumption,
+            decision.limits.get(state.id),
+        )
 
     def diagnostics(self) -> dict[str, Any]:
         """Data for the downloadable diagnostics."""

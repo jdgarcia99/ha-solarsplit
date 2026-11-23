@@ -10,6 +10,7 @@ from custom_components.solarsplit.engine import (
     LoadState,
     Measurements,
     Reason,
+    Regulator,
     compute_budget,
     decide,
 )
@@ -232,3 +233,103 @@ def test_switched_off_load_is_never_switched_on() -> None:
     assert d.reasons["pool"] is Reason.SWITCHED_OFF and "pool" not in d.desired
     assert (d.action, d.load_id) == (Action.TURN_ON, "ac")
     assert not d.reasons["ac"] is Reason.WAITING_HIGHER  # it does not hold the loads behind it
+
+
+
+def termo(actual_w: float = 0, priority: int = 2, **reg) -> LoadState:
+    """A water heater behind a diverter: limit 0-1600 W, now at its maximum."""
+    regulator = Regulator(**{"auto": True, "current": 1600, "minimum": 0, "maximum": 1600, **reg})
+    return LoadState(
+        id="termo", priority=priority, nominal_w=1600, is_on=True, actual_w=actual_w,
+        kind=LoadKind.REGULABLE, regulator=regulator,
+    )
+
+
+def test_regulable_first_in_line_keeps_its_maximum() -> None:
+    # The diverter takes 1200 W; the pool (after it) only gets what it leaves
+    d = decide(NOW, Measurements(50, 0), [termo(1200, priority=1, current=1600), pool(priority=2)], CFG)
+    assert d.reasons["termo"] is Reason.FULL_POWER and d.limits == {"termo": 1600}
+    assert d.writes == {} and d.desired == {"pool": False}
+    assert d.budget == 50 + 1200 - 100  # its power is surplus, counted in the budget
+
+
+def test_regulable_before_loads_that_are_off_keeps_its_maximum() -> None:
+    d = decide(NOW, Measurements(50, 0), [pool(eligible=False, priority=1), termo(1200)], CFG)
+    assert d.limits == {"termo": 1600} and d.writes == {}
+
+
+def test_regulable_behind_a_load_gets_what_is_left() -> None:
+    # Budget 50 + 1200 - 100 = 1150: the pool (750) enters first, the heater keeps 400
+    d = decide(NOW, Measurements(50, 0), [pool(), termo(1200)], CFG)
+    assert d.desired["pool"] is True
+    assert d.reasons["termo"] is Reason.LIMITED
+    assert d.limits == {"termo": 400} and d.writes == {"termo": 400}
+
+
+def test_regulable_limit_is_clamped() -> None:
+    d = decide(NOW, Measurements(0, 0), [pool(is_on=True), termo(0, minimum=200)], CFG)
+    assert d.limits == {"termo": 200}  # remaining is -100
+    d = decide(NOW, Measurements(5000, 0), [pool(is_on=True), termo(0, current=500)], CFG)
+    assert d.limits == {"termo": 1600} and d.reasons["termo"] is Reason.FULL_POWER
+
+
+def test_regulable_writes_only_big_changes() -> None:
+    loads = [pool(is_on=True), termo(400, current=420)]  # remaining 50 + 750 + 400 - 100 - 750 = 350
+    d = decide(NOW, Measurements(50, 0), loads, CFG)
+    assert d.limits == {"termo": 350} and d.writes == {}  # 100 W change needed
+    d = decide(NOW, Measurements(0, 0), loads, CFG)
+    assert d.writes == {"termo": 300}
+
+
+def test_regulable_bounds_are_always_written() -> None:
+    d = decide(NOW, Measurements(5000, 0), [pool(is_on=True), termo(0, current=1550)], CFG)
+    assert d.writes == {"termo": 1600}
+    d = decide(NOW, Measurements(0, 30), [pool(is_on=True), termo(0, current=50)], CFG)
+    assert d.writes == {"termo": 0}
+
+
+def test_regulable_writes_at_most_every_interval() -> None:
+    loads = [pool(is_on=True), termo(0, current=1600, written=NOW - 10, interval=30)]
+    d = decide(NOW, Measurements(0, 0), loads, CFG)
+    assert d.limits == {"termo": 0} and d.writes == {}
+    loads = [pool(is_on=True), termo(0, current=1600, written=NOW - 30, interval=30)]
+    assert decide(NOW, Measurements(0, 0), loads, CFG).writes == {"termo": 0}
+
+
+def test_regulable_outside_auto_is_grid_power() -> None:
+    # Manual or off on the diverter: its 1600 W are not surplus to hand out
+    loads = [termo(1600, priority=1, auto=False), pool(priority=2)]
+    d = decide(NOW, Measurements(0, 1600), loads, CFG)
+    assert d.reasons["termo"] is Reason.EXTERNAL and d.limits == {}
+    assert d.budget == -1700 and d.desired == {"pool": False}
+
+
+def test_regulable_limit_is_restored_when_solarsplit_lets_go() -> None:
+    lowered = {"current": 300, "lowered": True, "written": NOW - 1}
+    cases = [
+        decide(NOW, Measurements(0, 0), [termo(auto=False, **lowered)], CFG),
+        decide(NOW, Measurements(0, 0), [replace(termo(**lowered), managed=False)], CFG),
+        decide(NOW, Measurements(0, 0), [replace(termo(**lowered), global_ok=False)], CFG),
+        decide(NOW, Measurements(0, 0), [termo(**lowered)], CFG, active=False),
+    ]
+    assert [d.writes for d in cases] == [{"termo": 1600}] * 4
+    # Only a limit SolarSplit lowered is restored, and never on unknown data
+    assert decide(NOW, Measurements(0, 0), [termo(auto=False, current=300)], CFG).writes == {}
+    assert decide(NOW, None, [termo(auto=False, **lowered)], CFG).writes == {}
+    unavailable = replace(termo(auto=False, **lowered), available=False)
+    assert decide(NOW, Measurements(0, 0), [unavailable], CFG).writes == {}
+
+
+def test_regulable_switched_off_is_left_alone() -> None:
+    d = decide(NOW, Measurements(0, 0), [replace(termo(current=300), switched_off=True, is_on=False)], CFG)
+    assert d.reasons["termo"] is Reason.SWITCHED_OFF and d.writes == {}
+
+
+def test_regulable_not_eligible_gets_its_minimum() -> None:
+    d = decide(NOW, Measurements(3000, 0), [replace(termo(500), eligible=False)], CFG)
+    assert d.reasons["termo"] is Reason.NOT_ELIGIBLE and d.writes == {"termo": 0}
+
+
+def test_regulable_is_never_switched() -> None:
+    d = decide(NOW, Measurements(0, 3000), [replace(termo(1600), owned=True, global_ok=False)], CFG)
+    assert d.action is Action.NONE and d.reasons["termo"] is Reason.GLOBAL_CONDITION

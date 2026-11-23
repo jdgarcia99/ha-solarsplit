@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import floor
+
 from homeassistant.const import (
     ATTR_ENTITY_ID,
     ATTR_UNIT_OF_MEASUREMENT,
@@ -53,6 +55,34 @@ def read_watts(state: State | None) -> float | None:
         return None
     unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT, UnitOfPower.WATT)
     return value * WATTS_PER.get(unit, 1.0)
+
+
+def read_number(state: State | None) -> float | None:
+    """A number entity's value, or None if it is not usable."""
+    if state is None or state.state in UNUSABLE:
+        return None
+    try:
+        return float(state.state)
+    except ValueError:
+        return None
+
+
+async def async_set_limit(hass: HomeAssistant, entity_id: str, value: float) -> float:
+    """Write a power limit to a `number` or `input_number`, on its step and within its range.
+
+    Rounds down, so the device never gets more than it was given. Returns the value written.
+    """
+    attributes = state.attributes if (state := hass.states.get(entity_id)) else {}
+    step = float(attributes.get("step") or 1)
+    value = floor(value / step + 1e-9) * step
+    if (low := attributes.get("min")) is not None:
+        value = max(value, float(low))
+    if (high := attributes.get("max")) is not None:
+        value = min(value, float(high))
+    await hass.services.async_call(
+        split_entity_id(entity_id)[0], "set_value", {ATTR_ENTITY_ID: entity_id, "value": value}, blocking=True
+    )
+    return value
 
 
 async def async_switch_load(hass: HomeAssistant, entity_id: str, on: bool, hvac_mode: str) -> None:

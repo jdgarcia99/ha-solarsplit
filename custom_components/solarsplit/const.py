@@ -50,6 +50,21 @@ CONF_CONDITION_STATE = "condition_state"
 CONF_RESPECT_MANUAL = "respect_manual"
 CONF_HVAC_MODE = "hvac_mode"
 CONF_VARIABLE_ENTITY = "variable_entity"
+CONF_LOAD_TYPE = "load_type"
+
+# Regulable loads (a diverter): section of the load form, flattened when stored
+SECTION_REGULABLE = "regulable"
+CONF_LIMIT_ENTITY = "limit_entity"
+CONF_MODE_ENTITY = "mode_entity"
+CONF_AUTO_STATE = "auto_state"
+CONF_LIMIT_MIN = "limit_min"
+CONF_LIMIT_MAX = "limit_max"
+CONF_LIMIT_THRESHOLD = "limit_threshold"
+CONF_LIMIT_INTERVAL = "limit_interval"
+
+LOAD_TYPE_RELAY = "relay"  # switched on and off (regulated externally while its variable entity is on)
+LOAD_TYPE_REGULABLE = "regulable"  # regulates itself; SolarSplit only writes its power limit
+LOAD_TYPES = [LOAD_TYPE_RELAY, LOAD_TYPE_REGULABLE]
 
 DEFAULT_PRIORITY = 10
 DEFAULT_MIN_ON = 5  # min
@@ -59,3 +74,8 @@ DEFAULT_OFF_DELAY = 30  # s
 DEFAULT_CONDITION_STATE = "on"
 DEFAULT_HVAC_MODE = "cool"
 HVAC_MODES = ["cool", "heat", "dry", "fan_only", "heat_cool", "auto"]
+DEFAULT_AUTO_STATE = "Auto"
+DEFAULT_LIMIT_MIN = 0  # W
+DEFAULT_LIMIT_MAX = 2000  # W
+DEFAULT_LIMIT_THRESHOLD = 100  # W, smallest change of the limit worth writing
+DEFAULT_LIMIT_INTERVAL = 30  # s, minimum time between two writes of the limit

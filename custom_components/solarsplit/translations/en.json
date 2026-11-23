@@ -102,13 +102,14 @@
             "condition_state": "Usage condition state",
             "respect_manual": "Respect manual changes",
             "hvac_mode": "Climate mode when on",
-            "variable_entity": "Regulated externally when"
+            "variable_entity": "Regulated externally when",
+            "load_type": "Load type"
           },
           "data_description": {
             "name": "Shown on the load's device.",
-            "entity_id": "Switch, input boolean or climate entity that turns the load on and off.",
+            "entity_id": "Switch, input boolean or climate entity that turns the load on and off. For a regulable load, the switch in front of it: SolarSplit never switches it, and while it is off the load is blocked.",
             "nominal_power": "Power the load draws when on.",
-            "power_sensor": "Measured power of the load. When set, it is used instead of the nominal power.",
+            "power_sensor": "Measured power of the load. When set, it is used instead of the nominal power. Required for a regulable load.",
             "priority": "1 is served first.",
             "no_skip": "Only switch on when every eligible load before it is on.",
             "on_delay": "The surplus must cover the load for this long before it is switched on.",
@@ -120,7 +121,32 @@
             "condition_state": "State the usage condition entity must have, for example on.",
             "respect_manual": "If someone else switches the load, stop controlling it until it returns to the state SolarSplit set.",
             "hvac_mode": "Only for climate entities.",
-            "variable_entity": "While this entity is on (for example FreeDS master), the load is regulated elsewhere: SolarSplit never switches it, but its power counts."
+            "variable_entity": "While this entity is on (for example FreeDS master), the load is regulated elsewhere: SolarSplit never switches it, but its power counts.",
+            "load_type": "Relay: SolarSplit switches it on and off. Regulable: the device regulates itself (a diverter) and SolarSplit only writes its power limit; fill in the Regulable load section."
+          },
+          "sections": {
+            "regulable": {
+              "name": "Regulable load",
+              "description": "Only for the Regulable type. While the mode entity has the automatic value, the load's power is surplus: SolarSplit counts it and writes in the limit entity what the loads ahead of it leave (its maximum if nothing is ahead). In any other mode its power is grid power and the load is shown as external.",
+              "data": {
+                "limit_entity": "Limit entity",
+                "mode_entity": "Mode entity",
+                "auto_state": "Automatic mode value",
+                "limit_min": "Minimum limit",
+                "limit_max": "Maximum limit",
+                "limit_threshold": "Smallest change written",
+                "limit_interval": "Minimum time between writes"
+              },
+              "data_description": {
+                "limit_entity": "Number entity with the device's maximum power, for example the diverter's maximum power.",
+                "mode_entity": "Entity with the device's mode.",
+                "auto_state": "State of the mode entity that means automatic, for example Auto.",
+                "limit_min": "SolarSplit never writes less.",
+                "limit_max": "SolarSplit never writes more, and writes it back when it stops limiting the load.",
+                "limit_threshold": "A new limit is only written when it moves by at least this much, or reaches the minimum or maximum.",
+                "limit_interval": "So the device is not flooded with writes."
+              }
+            }
           }
         },
         "reconfigure": {
@@ -141,13 +167,14 @@
             "condition_state": "Usage condition state",
             "respect_manual": "Respect manual changes",
             "hvac_mode": "Climate mode when on",
-            "variable_entity": "Regulated externally when"
+            "variable_entity": "Regulated externally when",
+            "load_type": "Load type"
           },
           "data_description": {
             "name": "Shown on the load's device.",
-            "entity_id": "Switch, input boolean or climate entity that turns the load on and off.",
+            "entity_id": "Switch, input boolean or climate entity that turns the load on and off. For a regulable load, the switch in front of it: SolarSplit never switches it, and while it is off the load is blocked.",
             "nominal_power": "Power the load draws when on.",
-            "power_sensor": "Measured power of the load. When set, it is used instead of the nominal power.",
+            "power_sensor": "Measured power of the load. When set, it is used instead of the nominal power. Required for a regulable load.",
             "priority": "1 is served first.",
             "no_skip": "Only switch on when every eligible load before it is on.",
             "on_delay": "The surplus must cover the load for this long before it is switched on.",
@@ -159,12 +186,39 @@
             "condition_state": "State the usage condition entity must have, for example on.",
             "respect_manual": "If someone else switches the load, stop controlling it until it returns to the state SolarSplit set.",
             "hvac_mode": "Only for climate entities.",
-            "variable_entity": "While this entity is on (for example FreeDS master), the load is regulated elsewhere: SolarSplit never switches it, but its power counts."
+            "variable_entity": "While this entity is on (for example FreeDS master), the load is regulated elsewhere: SolarSplit never switches it, but its power counts.",
+            "load_type": "Relay: SolarSplit switches it on and off. Regulable: the device regulates itself (a diverter) and SolarSplit only writes its power limit; fill in the Regulable load section."
+          },
+          "sections": {
+            "regulable": {
+              "name": "Regulable load",
+              "description": "Only for the Regulable type. While the mode entity has the automatic value, the load's power is surplus: SolarSplit counts it and writes in the limit entity what the loads ahead of it leave (its maximum if nothing is ahead). In any other mode its power is grid power and the load is shown as external.",
+              "data": {
+                "limit_entity": "Limit entity",
+                "mode_entity": "Mode entity",
+                "auto_state": "Automatic mode value",
+                "limit_min": "Minimum limit",
+                "limit_max": "Maximum limit",
+                "limit_threshold": "Smallest change written",
+                "limit_interval": "Minimum time between writes"
+              },
+              "data_description": {
+                "limit_entity": "Number entity with the device's maximum power, for example the diverter's maximum power.",
+                "mode_entity": "Entity with the device's mode.",
+                "auto_state": "State of the mode entity that means automatic, for example Auto.",
+                "limit_min": "SolarSplit never writes less.",
+                "limit_max": "SolarSplit never writes more, and writes it back when it stops limiting the load.",
+                "limit_threshold": "A new limit is only written when it moves by at least this much, or reaches the minimum or maximum.",
+                "limit_interval": "So the device is not flooded with writes."
+              }
+            }
           }
         }
       },
       "error": {
-        "entity_in_use": "This entity already belongs to another load."
+        "entity_in_use": "This entity already belongs to another load.",
+        "regulable_incomplete": "A regulable load needs a power sensor, a limit entity and a mode entity.",
+        "limit_range": "The minimum limit must be lower than the maximum."
       }
     }
   },
@@ -177,6 +231,12 @@
         "fan_only": "Fan only",
         "heat_cool": "Heat/cool",
         "auto": "Auto"
+      }
+    },
+    "load_type": {
+      "options": {
+        "relay": "Relay",
+        "regulable": "Regulable"
       }
     }
   },
@@ -213,7 +273,8 @@
           "blocked": "Blocked",
           "manual": "Manual",
           "unmanaged": "Not managed",
-          "unavailable": "Unavailable"
+          "unavailable": "Unavailable",
+          "external": "External"
         }
       },
       "load_reason": {
@@ -240,7 +301,10 @@
           "mode_unknown": "Zero-injection entity unknown",
           "global_unknown": "Global condition unknown",
           "condition_unknown": "Usage condition unknown",
-          "switched_off": "Switched off externally"
+          "switched_off": "Switched off externally",
+          "external": "Regulated by the device outside its automatic mode",
+          "full_power": "Full power: nothing ahead of it",
+          "limited": "Limited to what the loads ahead leave"
         }
       }
     },
