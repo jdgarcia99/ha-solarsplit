@@ -28,6 +28,7 @@ from custom_components.solarsplit.const import (
     CONF_ON_DELAY,
     CONF_PRIORITY,
     CONF_RESPECT_GLOBAL,
+    CONF_RESPECT_MANUAL,
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
@@ -139,22 +140,19 @@ async def test_acts_one_load_at_a_time(hass: HomeAssistant, freezer: FrozenDateT
     assert [(c.data["entity_id"], c.data["hvac_mode"]) for c in climate] == [(AC, "cool")]
 
 
-async def test_manual_change_is_respected(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+async def test_manual_change_is_respected(hass: HomeAssistant) -> None:
     entry = await _setup(hass, shadow=False, loads=[_load("Pool", POOL, 750, 1)])
-    async_mock_service(hass, "switch", "turn_on")
     switch_off = async_mock_service(hass, "switch", "turn_off")
-    await _cycle(hass, entry, export=1000)
-    hass.states.async_set(POOL, "on")
+    entry.runtime_data.memory[_sid(POOL)].commanded = False  # SolarSplit left it off
 
-    hass.states.async_set(POOL, "off")  # someone switches it off by hand
-    freezer.tick(timedelta(seconds=31))
-    await _cycle(hass, entry, export=1000)
+    hass.states.async_set(POOL, "on")  # someone switches it on by hand
+    await _cycle(hass, entry, imp=1000)
     assert _state(hass, entry, "load_state", POOL) == "manual"
+    assert switch_off == []
 
-    hass.states.async_set(POOL, "on")  # back to the state SolarSplit set: controlled again
-    await _cycle(hass, entry, export=0, imp=500)
+    hass.states.async_set(POOL, "off")  # back to the state SolarSplit set: controlled again
+    await _cycle(hass, entry, imp=1000)
     assert _state(hass, entry, "load_reason", POOL) == "no_budget"
-    assert [c.data["entity_id"] for c in switch_off] == [POOL]
 
 
 async def test_master_and_managed_switches(hass: HomeAssistant) -> None:
@@ -343,8 +341,11 @@ async def test_restart_detects_a_change_made_while_stopped(
 ) -> None:
     _saved(hass_storage, freezer().timestamp())
     entry = await _setup(hass, shadow=False, loads=[_load("Pool", POOL, 750, 1)], pool="off")
+    switch_on = async_mock_service(hass, "switch", "turn_on")
     await _cycle(hass, entry, export=2000)
-    assert _state(hass, entry, "load_state", POOL) == "manual"
+    assert _state(hass, entry, "load_state", POOL) == "blocked"
+    assert _state(hass, entry, "load_reason", POOL) == "switched_off"
+    assert switch_on == []
 
 
 async def test_stale_delay_marks_are_dropped_on_restart(
@@ -430,3 +431,53 @@ async def test_entities_get_the_label(hass: HomeAssistant) -> None:
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
     assert len(entities) == 4 + 1 + 2 * 4  # loop sensors, master switch, 4 per load
     assert all(label.label_id in entity.labels for entity in entities)
+
+
+@pytest.mark.parametrize("respect_manual", [True, False])
+async def test_switched_off_externally_is_never_switched_back_on(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, respect_manual: bool
+) -> None:
+    entry = await _setup(hass, shadow=False, loads=[_load("Pool", POOL, 750, 1, **{CONF_RESPECT_MANUAL: respect_manual})])
+    switch_on = async_mock_service(hass, "switch", "turn_on")
+    await _cycle(hass, entry, export=1000)
+    hass.states.async_set(POOL, "on")
+    await _cycle(hass, entry, export=1000)
+
+    hass.states.async_set(POOL, "off")  # a safety cut
+    for _ in range(3):
+        freezer.tick(timedelta(minutes=10))
+        await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_state", POOL) == "blocked"
+    assert _state(hass, entry, "load_reason", POOL) == "switched_off"
+    assert len(switch_on) == 1
+
+    hass.states.async_set(POOL, "on")  # someone switches it on again: controlled again
+    await _cycle(hass, entry, export=1000)
+    hass.states.async_set(POOL, "off")
+    await _cycle(hass, entry, export=1000)
+    assert _state(hass, entry, "load_reason", POOL) == "switched_off"
+
+    managed = _entity(hass, f"{_sid(POOL)}_managed", "switch")  # Manage off and on clears it
+    await hass.services.async_call("switch", "turn_off", {"entity_id": managed}, blocking=True)
+    await hass.services.async_call("switch", "turn_on", {"entity_id": managed}, blocking=True)
+    freezer.tick(timedelta(minutes=10))
+    await _cycle(hass, entry, export=1000)
+    assert len(switch_on) == 2
+
+
+async def test_switch_off_by_solarsplit_does_not_block(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    entry = await _setup(hass, shadow=False, pool="on", loads=[_load("Pool", POOL, 750, 1)])
+    async_mock_service(hass, "switch", "turn_off")
+    await _cycle(hass, entry, imp=1000)
+    hass.states.async_set(POOL, "off")
+    freezer.tick(timedelta(seconds=31))
+    await _cycle(hass, entry, export=0)
+    assert _state(hass, entry, "load_reason", POOL) == "no_budget"
+
+
+async def test_shadow_mode_does_not_block(hass: HomeAssistant) -> None:
+    entry = await _setup(hass, pool="on")
+    await _cycle(hass, entry, export=1000)
+    hass.states.async_set(POOL, "off")  # the old automation switches it off
+    await _cycle(hass, entry, export=1000)
+    assert _state(hass, entry, "load_reason", POOL) == "fits"

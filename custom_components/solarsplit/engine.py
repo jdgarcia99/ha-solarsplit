@@ -50,6 +50,7 @@ class Reason(StrEnum):
     GLOBAL_CONDITION = "global_condition"
     GLOBAL_SHUTDOWN = "global_shutdown"
     VARIABLE = "variable"
+    SWITCHED_OFF = "switched_off"  # switched off by something else: never switched back on
     GLOBAL_UNKNOWN = "global_unknown"
     CONDITION_UNKNOWN = "condition_unknown"
 
@@ -85,6 +86,7 @@ class LoadState:
     managed: bool = True
     available: bool = True  # its entity reports a usable state
     manual: bool = False
+    switched_off: bool = False  # something else switched it off (a safety cut): never switched on
     owned: bool = False  # SolarSplit switched it on (in shadow mode: assumed for loads that are on)
     # The global condition holds, or this load ignores it. None: its entity is not
     # usable, and the load is left as it is.
@@ -119,7 +121,7 @@ class LoadState:
         A load it switched on stays its own when the global condition fails, to switch it off.
         """
         return (
-            self.managed and self.available and not self.manual
+            self.managed and self.available and not self.manual and not self.switched_off
             and ((self.global_ok is True and self.eligible is not None) or self.shutdown)
         )
 
@@ -187,6 +189,9 @@ def decide(
             continue
         if not load.available:
             reasons[load.id] = Reason.UNAVAILABLE
+            continue
+        if load.switched_off:
+            reasons[load.id] = Reason.SWITCHED_OFF
             continue
         if load.manual:
             reasons[load.id] = Reason.MANUAL

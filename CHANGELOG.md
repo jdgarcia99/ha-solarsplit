@@ -4,6 +4,7 @@
 
 - Unknown data is never 0 W. A missing or frozen grid reading makes the cycle decide nothing and publish the reason `grid_unknown` (the budget becomes unknown; entities stay available). New setting *Stale data timeout* (20 s): a non-zero grid reading not reported for longer, or both grid sensors quiet at once, counts as unknown.
 - An unknown zero-injection entity pauses the loop (`mode_unknown`); an unknown global or usage condition leaves its loads as they are (`global_unknown`, `condition_unknown`) instead of switching them off. A variable load whose power or regulation entity cannot be read is unavailable.
+- A load switched off by something else (a safety cut, a person, an automation) is `blocked` with reason `switched_off` and SolarSplit never switches it back on, even without *Respect manual changes*, until it is on again or its Manage switch is turned off and on. Not detected in shadow mode.
 - New brand: icon and README banner, with SVG sources in `images/`. The orange logos and `scripts/render_brand.py` are gone.
 
 ## 0.1.0 (unreleased)

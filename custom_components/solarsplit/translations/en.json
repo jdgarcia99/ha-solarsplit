@@ -239,7 +239,8 @@
           "grid_unknown": "Grid reading missing or frozen",
           "mode_unknown": "Zero-injection entity unknown",
           "global_unknown": "Global condition unknown",
-          "condition_unknown": "Usage condition unknown"
+          "condition_unknown": "Usage condition unknown",
+          "switched_off": "Switched off externally"
         }
       }
     },

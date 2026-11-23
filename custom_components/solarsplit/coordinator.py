@@ -91,7 +91,7 @@ LOAD_STATES = [LOAD_ON, LOAD_OFF, LOAD_WAITING, LOAD_BLOCKED, LOAD_MANUAL, LOAD_
 
 _BLOCKING = (
     Reason.NOT_ELIGIBLE, Reason.WAITING_HIGHER, Reason.NO_BUDGET, Reason.GLOBAL_CONDITION,
-    Reason.GLOBAL_UNKNOWN, Reason.CONDITION_UNKNOWN,
+    Reason.GLOBAL_UNKNOWN, Reason.CONDITION_UNKNOWN, Reason.SWITCHED_OFF,
 )
 _STATE_FOR = {
     Reason.MANUAL: LOAD_MANUAL,
@@ -157,17 +157,24 @@ class LoadMemory:
     commanded: bool | None = None  # last state SolarSplit set; None = never, or adopted
     last_seen: bool | None = None  # last usable on/off state observed
     last_change: float | None = None  # time of the last on/off transition observed
+    switched_off: bool = False  # switched off by something else; cleared when it is on again
 
-    def observe(self, is_on: bool | None, state: State | None) -> None:
+    def observe(self, is_on: bool | None, state: State | None, detect_off: bool) -> None:
         """Track on/off transitions with our own clock, which survives restarts.
 
         Home Assistant resets `last_changed` on restart; ours keeps the real time of
         the last transition as long as the load is still in the state we last saw.
+        With `detect_off`, a switch-off SolarSplit did not order (a safety cut, a
+        person, an automation) marks the load as switched off until it is on again.
         """
         if is_on is None or state is None or is_on == self.last_seen:
             return
         if self.last_seen is not None or self.last_change is None:
             self.last_change = state.last_changed.timestamp()
+        if is_on:
+            self.switched_off = False
+        elif self.last_seen and detect_off and self.commanded is not False:
+            self.switched_off = True
         self.last_seen = is_on
 
 
@@ -271,6 +278,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         memory = self.memory[load_id]
         if managed and not memory.managed:
             memory.commanded = None
+            memory.switched_off = False
         memory.managed = managed
         self.save_memory()
 
@@ -329,7 +337,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         memory = self.memory[load.id]
         state = self._state(load.entity_id)
         is_on = load_is_on(state)
-        memory.observe(is_on, state)
+        # In shadow mode nothing is switched by us, so every switch-off would look external.
+        memory.observe(is_on, state, detect_off=not self.shadow)
         manual = (
             load.respect_manual and memory.commanded is not None
             and is_on is not None and is_on != memory.commanded
@@ -356,6 +365,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             managed=memory.managed,
             available=available,
             manual=manual,
+            switched_off=memory.switched_off and not self.shadow and is_on is False,
             owned=owned,
             global_ok=True if not load.respect_global else global_on,
             eligible=eligible,

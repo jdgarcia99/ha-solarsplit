@@ -239,7 +239,8 @@
           "grid_unknown": "Lectura de red ausente o congelada",
           "mode_unknown": "Entidad de inyección cero desconocida",
           "global_unknown": "Condición global desconocida",
-          "condition_unknown": "Condición de uso desconocida"
+          "condition_unknown": "Condición de uso desconocida",
+          "switched_off": "Apagada desde fuera"
         }
       }
     },

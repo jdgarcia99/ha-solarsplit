@@ -225,3 +225,10 @@ def test_unknown_usage_condition_leaves_the_load_as_it_is() -> None:
     d = decide(NOW, Measurements(0, 0), loads, CFG)
     assert d.reasons["ac"] is Reason.CONDITION_UNKNOWN and "ac" not in d.desired
     assert d.action is Action.NONE  # the 900 W it draws are not handed to the pool
+
+
+def test_switched_off_load_is_never_switched_on() -> None:
+    d = decide(NOW, Measurements(5000, 0), [pool(switched_off=True), ac()], CFG)
+    assert d.reasons["pool"] is Reason.SWITCHED_OFF and "pool" not in d.desired
+    assert (d.action, d.load_id) == (Action.TURN_ON, "ac")
+    assert not d.reasons["ac"] is Reason.WAITING_HIGHER  # it does not hold the loads behind it
