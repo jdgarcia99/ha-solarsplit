@@ -179,7 +179,7 @@ class Decision:
     off_since: dict[str, float] = field(default_factory=dict)  # loads whose switch-off condition holds
     limits: dict[str, float] = field(default_factory=dict)  # W, limit each regulable load should have
     writes: dict[str, float] = field(default_factory=dict)  # W, limits to write in this cycle
-    target_reached: frozenset[str] = frozenset()  # loads whose daily target is met
+    target_reached: tuple[str, ...] = ()  # loads whose daily target is met
 
 
 def _since(previous: float | None, now: float) -> float:
@@ -324,7 +324,7 @@ def decide(
             gap = True
 
     by_id = {load.id: load for load in loads}
-    reached = frozenset(i for i, reason in reasons.items() if reason is Reason.TARGET_REACHED)
+    reached = tuple(sorted(i for i, reason in reasons.items() if reason is Reason.TARGET_REACHED))
     offs = sorted(
         (by_id[i] for i, on in desired.items() if not on and by_id[i].is_on),
         key=lambda load: (-load.priority, load.id),

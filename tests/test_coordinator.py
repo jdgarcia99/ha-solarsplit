@@ -1,5 +1,6 @@
 """The control loop inside Home Assistant: shadow mode, acting, entities."""
 
+import json
 from datetime import timedelta
 from typing import Any
 
@@ -9,6 +10,7 @@ from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
+from homeassistant.helpers.json import json_dumps
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -47,6 +49,7 @@ from custom_components.solarsplit.const import (
     LOAD_TYPE_REGULABLE,
     SUBENTRY_LOAD,
 )
+from custom_components.solarsplit.diagnostics import async_get_config_entry_diagnostics
 
 from .conftest import EXPORT, IMPORT
 
@@ -712,3 +715,16 @@ async def test_daily_target_unknown_leaves_the_load(hass: HomeAssistant, unknown
     await _cycle(hass, entry, imp=2000)
     assert _state(hass, entry, "load_reason", POOL) == "condition_unknown"
     assert _state(hass, entry, "last_decision") == "none"
+
+
+async def test_diagnostics_serialise(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    _morning(freezer)
+    entry, _ = await _setup_termo(
+        hass, loads=[_load("Pool", POOL, 750, 1, **{CONF_TARGET_HOURS: 0.1}), _termo()]
+    )
+    hass.states.async_set(POOL, "on")
+    freezer.tick(timedelta(hours=1))
+    await _cycle(hass, entry, export=80)
+    diagnostics = await async_get_config_entry_diagnostics(hass, entry)
+    assert diagnostics["last_cycle"]["decision"]["target_reached"] == (_sid(POOL),)
+    json.loads(json_dumps(diagnostics))
