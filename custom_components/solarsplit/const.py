@@ -62,6 +62,12 @@ CONF_LIMIT_MAX = "limit_max"
 CONF_LIMIT_THRESHOLD = "limit_threshold"
 CONF_LIMIT_INTERVAL = "limit_interval"
 
+# Daily target: section of the load form, flattened when stored
+SECTION_DAILY_TARGET = "daily_target"
+CONF_HOURS_SENSOR = "hours_sensor"
+CONF_TARGET_ENTITY = "target_entity"
+CONF_TARGET_HOURS = "target_hours"
+
 LOAD_TYPE_RELAY = "relay"  # switched on and off (regulated externally while its variable entity is on)
 LOAD_TYPE_REGULABLE = "regulable"  # regulates itself; SolarSplit only writes its power limit
 LOAD_TYPES = [LOAD_TYPE_RELAY, LOAD_TYPE_REGULABLE]
@@ -74,6 +80,7 @@ DEFAULT_OFF_DELAY = 30  # s
 DEFAULT_CONDITION_STATE = "on"
 DEFAULT_HVAC_MODE = "cool"
 HVAC_MODES = ["cool", "heat", "dry", "fan_only", "heat_cool", "auto"]
+DEFAULT_TARGET_HOURS = 0  # h, 0 = no fixed daily target
 DEFAULT_AUTO_STATE = "Auto"
 DEFAULT_LIMIT_MIN = 0  # W
 DEFAULT_LIMIT_MAX = 2000  # W

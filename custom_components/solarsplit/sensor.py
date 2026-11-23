@@ -1,4 +1,4 @@
-"""Sensors: budget, assigned power, mode and last decision; state and reason of every load."""
+"""Sensors: budget, assigned power, mode and last decision; state, reason and time on today of every load."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfPower
+from homeassistant.const import UnitOfPower, UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
@@ -35,7 +35,11 @@ async def async_setup_entry(
     ])
     for load in coordinator.loads:
         async_add_entities(
-            [LoadStateSensor(coordinator, "load_state", load), LoadReasonSensor(coordinator, "load_reason", load)],
+            [
+                LoadStateSensor(coordinator, "load_state", load),
+                LoadReasonSensor(coordinator, "load_reason", load),
+                OnTodaySensor(coordinator, "on_today", load),
+            ],
             config_subentry_id=load.id,
         )
 
@@ -135,3 +139,17 @@ class LoadReasonSensor(LoadSensor):
     def native_value(self) -> str:
         """Reason code; the UI translates it."""
         return self.view.reason.value
+
+
+class OnTodaySensor(LoadSensor):
+    """Hours the load has been on today, by SolarSplit's own count of its state."""
+
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.HOURS
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_suggested_display_precision = 2
+
+    @property
+    def native_value(self) -> float:
+        """Hours on today."""
+        return round(self.view.on_today, 4)

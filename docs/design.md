@@ -145,7 +145,7 @@ Todas con la etiqueta «Gestión de excedentes» y agrupadas en un dispositivo g
 | Estado | sensor (enum) | encendida, apagada, esperando, bloqueada, manual |
 | Motivo | sensor | p. ej. «tiempo mínimo apagada: faltan 3 min», «condición de uso no cumplida» |
 | Prioridad | number | editable al vuelo |
-| Tiempo encendida hoy | sensor (h) | útil para la depuradora |
+| Tiempo encendida hoy | sensor (h) | útil para la depuradora (0.2.0) |
 
 **Servicios:**
 
@@ -179,7 +179,9 @@ El atributo de diagnóstico de cada ciclo (presupuesto, cargas evaluadas, decisi
   - **Devolución del máximo.** Si SolarSplit la bajó (`lowered`) y deja de limitarla (pausa o interruptor maestro, Gestionar apagado, otro modo, condición global apagada, interruptor apagado), el motor escribe el máximo en el acto. Al descargar o desactivar la entrada lo hace el coordinador. Solo se devuelve lo que SolarSplit bajó, para no pisar un valor puesto a mano. Con datos de red desconocidos no se escribe nada.
   - **Nunca se conmuta.** Su entidad es el interruptor que tiene delante (`switch.termo`): SolarSplit no lo toca; si está apagado, la carga queda bloqueada (`switched_off`). Con potencia, límite o modo ilegibles, no disponible: no se escribe.
 - **Termo con FreeDS:** la carga tiene un campo «Regulada externamente cuando» (`freeds_maestro`). Con esa entidad encendida es una carga variable; apagada, un relé normal.
-- **Pendiente:** sondeo en inyección cero (el modo se detecta y el motor queda en pausa), balance neto horario, servicios, objetivo diario y condiciones por plantilla y sensor de tiempo encendida hoy.
+- **Objetivo diario (0.2.0).** Sección plegable «Objetivo diario» de la subentrada: sensor de horas hoy (opcional; vacío = cuenta propia), entidad con las horas objetivo (`input_number`, `number` o `sensor`) o un valor fijo (0 = sin objetivo). El motor recibe `hours_today`, `target_hours` y `target_done`; si las horas llegan al objetivo, la carga deja de ser elegible (motivo `target_reached`): se apaga respetando el tiempo mínimo encendida y no cuenta como hueco para «no saltar». Una regulable recibe su límite mínimo. El motor devuelve `Decision.target_reached` y el coordinador guarda la fecha local en la memoria: queda cumplido **hasta el día siguiente**, aunque luego suba el objetivo o baje el sensor. Reactivar Gestionar lo borra. Con horas u objetivo ilegibles (y sin cumplir hoy), la condición es desconocida y la carga se deja como esté.
+- **Tiempo encendida hoy (0.2.0).** Sensor por carga (h, `total_increasing`) contado por el coordinador a partir del estado real de la carga, la encienda quien la encienda: suma de los tramos cerrados de hoy más el tramo en curso desde la medianoche local como muy pronto. Va en la memoria persistente (`today`, `on_today`), así que sobrevive a reinicios; se pone a cero al cambiar la fecha local. Es la cuenta que usa el objetivo diario si no se indica sensor de horas.
+- **Pendiente:** sondeo en inyección cero (el modo se detecta y el motor queda en pausa), balance neto horario, servicios, condiciones por plantilla y coordinación con TankWise.
 
 ## Casos especiales
 

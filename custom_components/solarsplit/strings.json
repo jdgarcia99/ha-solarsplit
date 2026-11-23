@@ -146,6 +146,20 @@
                 "limit_threshold": "A new limit is only written when it moves by at least this much, or reaches the minimum or maximum.",
                 "limit_interval": "So the device is not flooded with writes."
               }
+            },
+            "daily_target": {
+              "name": "Daily target",
+              "description": "Hours the load should run per day. Once they are reached, the load is not eligible until the next day: it is switched off (after its minimum on time) and stays off.",
+              "data": {
+                "hours_sensor": "Hours on today sensor",
+                "target_entity": "Target hours entity",
+                "target_hours": "Target hours"
+              },
+              "data_description": {
+                "hours_sensor": "Sensor with the hours the load has been on today, for example a history stats sensor. Empty: SolarSplit's own count (the load's Time on today sensor).",
+                "target_entity": "Input number or sensor with the hours wanted today. Takes precedence over the fixed value.",
+                "target_hours": "Fixed hours wanted per day, when there is no target entity. 0: no daily target."
+              }
             }
           }
         },
@@ -210,6 +224,20 @@
                 "limit_max": "SolarSplit never writes more, and writes it back when it stops limiting the load.",
                 "limit_threshold": "A new limit is only written when it moves by at least this much, or reaches the minimum or maximum.",
                 "limit_interval": "So the device is not flooded with writes."
+              }
+            },
+            "daily_target": {
+              "name": "Daily target",
+              "description": "Hours the load should run per day. Once they are reached, the load is not eligible until the next day: it is switched off (after its minimum on time) and stays off.",
+              "data": {
+                "hours_sensor": "Hours on today sensor",
+                "target_entity": "Target hours entity",
+                "target_hours": "Target hours"
+              },
+              "data_description": {
+                "hours_sensor": "Sensor with the hours the load has been on today, for example a history stats sensor. Empty: SolarSplit's own count (the load's Time on today sensor).",
+                "target_entity": "Input number or sensor with the hours wanted today. Takes precedence over the fixed value.",
+                "target_hours": "Fixed hours wanted per day, when there is no target entity. 0: no daily target."
               }
             }
           }
@@ -304,8 +332,12 @@
           "switched_off": "Switched off externally",
           "external": "Regulated by the device outside its automatic mode",
           "full_power": "Full power: nothing ahead of it",
-          "limited": "Limited to what the loads ahead leave"
+          "limited": "Limited to what the loads ahead leave",
+          "target_reached": "Daily target reached"
         }
+      },
+      "on_today": {
+        "name": "Time on today"
       }
     },
     "switch": {

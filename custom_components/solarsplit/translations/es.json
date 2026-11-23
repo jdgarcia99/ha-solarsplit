@@ -146,6 +146,20 @@
                 "limit_threshold": "Un límite nuevo solo se escribe si cambia al menos esto, o si llega al mínimo o al máximo.",
                 "limit_interval": "Para no saturar el dispositivo con escrituras."
               }
+            },
+            "daily_target": {
+              "name": "Objetivo diario",
+              "description": "Horas que debe funcionar la carga cada día. Al cumplirlas, la carga deja de ser elegible hasta el día siguiente: se apaga (tras su tiempo mínimo encendida) y no vuelve a encenderse.",
+              "data": {
+                "hours_sensor": "Sensor de horas hoy",
+                "target_entity": "Entidad de horas objetivo",
+                "target_hours": "Horas objetivo"
+              },
+              "data_description": {
+                "hours_sensor": "Sensor con las horas que lleva encendida hoy, por ejemplo uno de estadísticas del historial. Vacío: la cuenta propia de SolarSplit (el sensor Tiempo encendida hoy de la carga).",
+                "target_entity": "Input number o sensor con las horas que se quieren hoy. Tiene prioridad sobre el valor fijo.",
+                "target_hours": "Horas fijas al día, si no hay entidad de objetivo. 0: sin objetivo diario."
+              }
             }
           }
         },
@@ -210,6 +224,20 @@
                 "limit_max": "SolarSplit nunca escribe más, y lo vuelve a escribir cuando deja de limitar la carga.",
                 "limit_threshold": "Un límite nuevo solo se escribe si cambia al menos esto, o si llega al mínimo o al máximo.",
                 "limit_interval": "Para no saturar el dispositivo con escrituras."
+              }
+            },
+            "daily_target": {
+              "name": "Objetivo diario",
+              "description": "Horas que debe funcionar la carga cada día. Al cumplirlas, la carga deja de ser elegible hasta el día siguiente: se apaga (tras su tiempo mínimo encendida) y no vuelve a encenderse.",
+              "data": {
+                "hours_sensor": "Sensor de horas hoy",
+                "target_entity": "Entidad de horas objetivo",
+                "target_hours": "Horas objetivo"
+              },
+              "data_description": {
+                "hours_sensor": "Sensor con las horas que lleva encendida hoy, por ejemplo uno de estadísticas del historial. Vacío: la cuenta propia de SolarSplit (el sensor Tiempo encendida hoy de la carga).",
+                "target_entity": "Input number o sensor con las horas que se quieren hoy. Tiene prioridad sobre el valor fijo.",
+                "target_hours": "Horas fijas al día, si no hay entidad de objetivo. 0: sin objetivo diario."
               }
             }
           }
@@ -304,8 +332,12 @@
           "switched_off": "Apagada desde fuera",
           "external": "Regulada por el dispositivo fuera de su modo automático",
           "full_power": "Potencia máxima: nada por delante",
-          "limited": "Limitada a lo que dejan las cargas anteriores"
+          "limited": "Limitada a lo que dejan las cargas anteriores",
+          "target_reached": "Objetivo diario cumplido"
         }
+      },
+      "on_today": {
+        "name": "Tiempo encendida hoy"
       }
     },
     "switch": {

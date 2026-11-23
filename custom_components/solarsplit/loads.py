@@ -19,6 +19,7 @@ from homeassistant.core import HomeAssistant, State, split_entity_id
 CLIMATE = "climate"
 HVAC_OFF = "off"
 UNUSABLE = (STATE_UNAVAILABLE, STATE_UNKNOWN)
+HOURS_PER = {"h": 1.0, "min": 1 / 60, "s": 1 / 3600}
 WATTS_PER = {UnitOfPower.WATT: 1.0, UnitOfPower.KILO_WATT: 1000.0, UnitOfPower.MEGA_WATT: 1_000_000.0}
 
 
@@ -55,6 +56,13 @@ def read_watts(state: State | None) -> float | None:
         return None
     unit = state.attributes.get(ATTR_UNIT_OF_MEASUREMENT, UnitOfPower.WATT)
     return value * WATTS_PER.get(unit, 1.0)
+
+
+def read_hours(state: State | None) -> float | None:
+    """A duration sensor's value in hours (also min and s), or None if it is not usable."""
+    if (value := read_number(state)) is None:
+        return None
+    return value * HOURS_PER.get(state.attributes.get(ATTR_UNIT_OF_MEASUREMENT, "h"), 1.0)
 
 
 def read_number(state: State | None) -> float | None:

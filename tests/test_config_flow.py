@@ -11,6 +11,7 @@ from custom_components.solarsplit.const import (
     CONF_AUTO_STATE,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_HOURS_SENSOR,
     CONF_IMPORT_SENSOR,
     CONF_LIMIT_ENTITY,
     CONF_LIMIT_MAX,
@@ -25,6 +26,8 @@ from custom_components.solarsplit.const import (
     CONF_RESPECT_MANUAL,
     CONF_SAFETY_MARGIN,
     CONF_STALE_TIMEOUT,
+    CONF_TARGET_ENTITY,
+    CONF_TARGET_HOURS,
     DEFAULT_AUTO_STATE,
     DEFAULT_LIMIT_THRESHOLD,
     DEFAULT_PRIORITY,
@@ -33,6 +36,7 @@ from custom_components.solarsplit.const import (
     DOMAIN,
     LOAD_TYPE_REGULABLE,
     LOAD_TYPE_RELAY,
+    SECTION_DAILY_TARGET,
     SECTION_REGULABLE,
     SUBENTRY_LOAD,
 )
@@ -180,3 +184,16 @@ async def test_relay_load_ignores_the_regulable_section(hass: HomeAssistant) -> 
     assert result["type"] is FlowResultType.CREATE_ENTRY
     (subentry,) = entry.subentries.values()
     assert load_settings(subentry)[CONF_LOAD_TYPE] == LOAD_TYPE_RELAY
+
+
+async def test_add_load_with_daily_target(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    target = {CONF_HOURS_SENSOR: "sensor.piscina_on_hoy", CONF_TARGET_ENTITY: "input_number.horas_piscina"}
+    result = await _add_load(hass, entry, {**LOAD, SECTION_DAILY_TARGET: target})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (subentry,) = entry.subentries.values()
+    assert SECTION_DAILY_TARGET not in subentry.data
+    settings = load_settings(subentry)
+    assert settings[CONF_HOURS_SENSOR] == "sensor.piscina_on_hoy"
+    assert settings[CONF_TARGET_ENTITY] == "input_number.horas_piscina"
+    assert settings[CONF_TARGET_HOURS] == 0

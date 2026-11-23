@@ -27,6 +27,7 @@ from .const import (
     CONF_CYCLE_INTERVAL,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_HOURS_SENSOR,
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
     CONF_IMPORT_TOLERANCE,
@@ -54,6 +55,8 @@ from .const import (
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
     CONF_STALE_TIMEOUT,
+    CONF_TARGET_ENTITY,
+    CONF_TARGET_HOURS,
     CONF_VARIABLE_ENTITY,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
@@ -76,6 +79,7 @@ from .loads import (
     entity_has_state,
     entity_is_on,
     load_is_on,
+    read_hours,
     read_number,
     read_watts,
 )
@@ -106,7 +110,7 @@ LOAD_STATES = [
 
 _BLOCKING = (
     Reason.NOT_ELIGIBLE, Reason.WAITING_HIGHER, Reason.NO_BUDGET, Reason.GLOBAL_CONDITION,
-    Reason.GLOBAL_UNKNOWN, Reason.CONDITION_UNKNOWN, Reason.SWITCHED_OFF,
+    Reason.GLOBAL_UNKNOWN, Reason.CONDITION_UNKNOWN, Reason.SWITCHED_OFF, Reason.TARGET_REACHED,
 )
 _STATE_FOR = {
     Reason.MANUAL: LOAD_MANUAL,
@@ -145,6 +149,9 @@ class LoadConfig:
     limit_max: float = 0  # W
     limit_threshold: float = 0  # W
     limit_interval: float = 0  # s
+    hours_sensor: str | None = None  # hours on today; None: SolarSplit's own count
+    target_entity: str | None = None  # hours wanted per day, read every cycle
+    target_hours: float = 0  # h, fixed target when there is no target entity; 0 = none
 
     @classmethod
     def from_subentry(cls, subentry: ConfigSubentry) -> LoadConfig:
@@ -176,7 +183,15 @@ class LoadConfig:
             limit_max=float(s[CONF_LIMIT_MAX]),
             limit_threshold=float(s[CONF_LIMIT_THRESHOLD]),
             limit_interval=float(s[CONF_LIMIT_INTERVAL]),
+            hours_sensor=s[CONF_HOURS_SENSOR],
+            target_entity=s[CONF_TARGET_ENTITY],
+            target_hours=float(s[CONF_TARGET_HOURS]),
         )
+
+    @property
+    def has_target(self) -> bool:
+        """Whether the load has a daily target."""
+        return self.target_entity is not None or self.target_hours > 0
 
 
 @dataclass
@@ -192,8 +207,21 @@ class LoadMemory:
     switched_off: bool = False  # switched off by something else; cleared when it is on again
     limit_written: float | None = None  # regulable: time SolarSplit last wrote the limit
     lowered: bool = False  # regulable: SolarSplit set the limit below the maximum
+    today: str | None = None  # local date the counters below refer to
+    on_today: float = 0  # s on today in finished runs; the current run is added by on_time()
+    target_done: str | None = None  # local date its daily target was reached
 
-    def observe(self, is_on: bool | None, state: State | None, detect_off: bool) -> None:
+    def new_day(self, today: str) -> None:
+        """Reset the day's counters when the local date changes."""
+        if self.today != today:
+            self.today, self.on_today = today, 0.0
+
+    def on_time(self, now: float, midnight: float) -> float:
+        """Seconds on today, counting the current run since midnight at the latest."""
+        running = now - max(self.last_change, midnight) if self.last_seen and self.last_change else 0.0
+        return self.on_today + max(running, 0.0)
+
+    def observe(self, is_on: bool | None, state: State | None, detect_off: bool, midnight: float = 0) -> None:
         """Track on/off transitions with our own clock, which survives restarts.
 
         Home Assistant resets `last_changed` on restart; ours keeps the real time of
@@ -203,6 +231,8 @@ class LoadMemory:
         """
         if is_on is None or state is None or is_on == self.last_seen:
             return
+        if self.last_seen and self.last_change is not None:  # a run ends: add it to today
+            self.on_today += max(state.last_changed.timestamp() - max(self.last_change, midnight), 0.0)
         if self.last_seen is not None or self.last_change is None:
             self.last_change = state.last_changed.timestamp()
         if is_on:
@@ -221,6 +251,7 @@ class LoadView:
     is_on: bool | None
     power: float
     limit: float | None = None  # regulable: the limit it should have
+    on_today: float = 0  # h on today, by SolarSplit's own count
 
 
 @dataclass(frozen=True)
@@ -263,6 +294,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.active = True  # master switch
         self.last_action: float | None = None
         self._samples: deque[tuple[float, float, float]] = deque()
+        self._today = ""  # local date and start of day of the current cycle
+        self._midnight = 0.0
 
     async def async_load_memory(self) -> None:
         """Restore the memory saved by the previous run.
@@ -314,6 +347,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         if managed and not memory.managed:
             memory.commanded = None
             memory.switched_off = False
+            memory.target_done = None
         memory.managed = managed
         self.save_memory()
 
@@ -367,13 +401,26 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             return None
         return readings[0][0], readings[1][0]
 
-    def _load_state(self, load: LoadConfig, global_on: bool | None) -> LoadState:
+    def _target(self, load: LoadConfig, memory: LoadMemory, now: float) -> tuple[float | None, float | None]:
+        """Hours on today and hours wanted; None when unknown, or when there is no target."""
+        if not load.has_target:
+            return None, None
+        if load.hours_sensor is None:
+            hours = memory.on_time(now, self._midnight) / 3600
+        else:
+            hours = read_hours(self._state(load.hours_sensor))
+        if load.target_entity is None:
+            return hours, load.target_hours
+        return hours, read_number(self._state(load.target_entity))
+
+    def _load_state(self, load: LoadConfig, global_on: bool | None, now: float) -> LoadState:
         """Engine input for one load."""
         memory = self.memory[load.id]
         state = self._state(load.entity_id)
         is_on = load_is_on(state)
+        memory.new_day(self._today)
         # In shadow mode nothing is switched by us, so every switch-off would look external.
-        memory.observe(is_on, state, detect_off=not self.shadow)
+        memory.observe(is_on, state, detect_off=not self.shadow, midnight=self._midnight)
         manual = (
             load.respect_manual and memory.commanded is not None
             and is_on is not None and is_on != memory.commanded
@@ -383,6 +430,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         eligible = load.condition_entity is None or entity_has_state(
             self._state(load.condition_entity), load.condition_state
         )
+        hours, target = self._target(load, memory, now)
+        target_done = memory.target_done == self._today
+        if load.has_target and None in (hours, target) and not target_done and eligible:
+            eligible = None  # unknown progress: left as it is
         actual_w = read_watts(self._state(load.power_sensor))
         regulator = None
         switched_off = memory.switched_off and not self.shadow and is_on is False
@@ -430,11 +481,16 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             on_since=memory.on_since,
             off_since=memory.off_since,
             regulator=regulator,
+            hours_today=hours,
+            target_hours=target,
+            target_done=target_done,
         )
 
     async def _async_update_data(self) -> CycleResult:
         """Run one control cycle."""
         now = dt_util.utcnow().timestamp()
+        self._today = dt_util.now().date().isoformat()
+        self._midnight = dt_util.start_of_local_day().timestamp()
         meas = None
         if (grid := self._grid(now)) is not None:
             meas = Measurements(*self._smoothed(now, *grid))
@@ -453,7 +509,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         else:
             mode = MODE_NORMAL
 
-        states = [self._load_state(load, global_on) for load in self.loads]
+        states = [self._load_state(load, global_on, now) for load in self.loads]
         decision = decide(
             now, meas, states, self.engine_config,
             self.last_action, active=mode == MODE_NORMAL, pause_reason=pause_reason,
@@ -462,6 +518,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             memory = self.memory[load.id]
             memory.on_since = decision.on_since.get(load.id)
             memory.off_since = decision.off_since.get(load.id)
+            if load.id in decision.target_reached:
+                memory.target_done = self._today
 
         if not self.shadow:
             for load_id, value in decision.writes.items():
@@ -475,7 +533,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             export_w=meas.export_w if meas else None, import_w=meas.import_w if meas else None,
             assigned_w=sum(s.consumption for s in states if s.controlled),
             decision=decision,
-            loads={s.id: self._view(s, decision) for s in states},
+            loads={
+                s.id: self._view(s, decision, self.memory[s.id].on_time(now, self._midnight) / 3600)
+                for s in states
+            },
         )
 
     async def _async_execute(self, decision: Decision, now: float) -> None:
@@ -513,7 +574,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
                 await self._async_write_limit(load, load.limit_max, now)
 
     @staticmethod
-    def _view(state: LoadState, decision: Decision) -> LoadView:
+    def _view(state: LoadState, decision: Decision, on_today: float) -> LoadView:
         """Summarise a load for its state and reason entities."""
         reason = decision.reasons.get(state.id, decision.reason)
         if (fixed := _STATE_FOR.get(reason)) is not None:
@@ -528,7 +589,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             shown = LOAD_ON if state.is_on else LOAD_OFF
         return LoadView(
             shown, reason, state.is_on if state.available else None, state.consumption,
-            decision.limits.get(state.id),
+            decision.limits.get(state.id), on_today,
         )
 
     def diagnostics(self) -> dict[str, Any]:

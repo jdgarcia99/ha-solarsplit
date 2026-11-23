@@ -25,6 +25,7 @@ from .const import (
     CONF_CYCLE_INTERVAL,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_HOURS_SENSOR,
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
     CONF_IMPORT_TOLERANCE,
@@ -53,6 +54,8 @@ from .const import (
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
     CONF_STALE_TIMEOUT,
+    CONF_TARGET_ENTITY,
+    CONF_TARGET_HOURS,
     CONF_VARIABLE_ENTITY,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
@@ -62,6 +65,7 @@ from .const import (
     LOAD_TYPES,
     MAX_CYCLE_INTERVAL,
     MIN_CYCLE_INTERVAL,
+    SECTION_DAILY_TARGET,
     SECTION_REGULABLE,
     SUBENTRY_LOAD,
 )
@@ -78,7 +82,14 @@ LIMIT_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=["nu
 MODE_ENTITY = selector.EntitySelector(
     selector.EntitySelectorConfig(domain=["select", "input_select", "switch", "input_boolean"])
 )
-SECTIONS = (SECTION_REGULABLE,)
+HOURS_SENSOR = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+TARGET_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=["input_number", "number", "sensor"]))
+HOURS = selector.NumberSelector(
+    selector.NumberSelectorConfig(
+        min=0, max=24, step=0.1, mode=selector.NumberSelectorMode.BOX, unit_of_measurement=UnitOfTime.HOURS
+    )
+)
+SECTIONS = (SECTION_REGULABLE, SECTION_DAILY_TARGET)
 OPTIONAL_ENTITIES = (CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION)
 
 
@@ -142,6 +153,13 @@ def load_schema(values: dict[str, Any]) -> vol.Schema:
             required(CONF_LIMIT_INTERVAL): _number(0, 3600, UnitOfTime.SECONDS),
         }
     )
+    daily_target = vol.Schema(
+        {
+            _optional(CONF_HOURS_SENSOR, values): HOURS_SENSOR,
+            _optional(CONF_TARGET_ENTITY, values): TARGET_ENTITY,
+            required(CONF_TARGET_HOURS): HOURS,
+        }
+    )
     return vol.Schema(
         {
             required(CONF_NAME): selector.TextSelector(),
@@ -167,6 +185,9 @@ def load_schema(values: dict[str, Any]) -> vol.Schema:
             _optional(CONF_VARIABLE_ENTITY, values): BOOLEAN_ENTITY,
             vol.Optional(SECTION_REGULABLE, default={}): section(
                 regulable, {"collapsed": values[CONF_LOAD_TYPE] != LOAD_TYPE_REGULABLE}
+            ),
+            vol.Optional(SECTION_DAILY_TARGET, default={}): section(
+                daily_target, {"collapsed": not (values[CONF_TARGET_ENTITY] or values[CONF_TARGET_HOURS])}
             ),
         }
     )

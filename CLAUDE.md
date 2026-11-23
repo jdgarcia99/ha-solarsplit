@@ -13,10 +13,10 @@ Custom Home Assistant integration (domain `solarsplit`), distributed through HAC
   - `const.py`: `CONF_*` keys, `DEFAULT_*` values and limits.
   - `__init__.py`: entry setup: coordinator in `entry.runtime_data`, platforms, reload when options or subentries change.
   - `entity.py`: base entity; one service device for the loop and one per load (entities of a load are added with `config_subentry_id`).
-  - `sensor.py` (budget, assigned power, mode, last decision; per load state and reason), `switch.py` (master switch and per-load Manage, kept in the coordinator memory saved across restarts), `number.py` (per-load priority, applied on the fly and written to the subentry without reloading), `diagnostics.py`.
+  - `sensor.py` (budget, assigned power, mode, last decision; per load state, reason and time on today), `switch.py` (master switch and per-load Manage, kept in the coordinator memory saved across restarts), `number.py` (per-load priority, applied on the fly and written to the subentry without reloading), `diagnostics.py`.
   - `strings.json`, `translations/en.json`, `translations/es.json`: UI text, including entity names and enum states.
   - `brand/`: `icon.png` and `icon@2x.png`, copied from `images/`.
-- Not implemented yet (see the design): zero-injection probing (the mode is detected and the engine stays paused), hourly net balance, services `force_on` / `force_off` / `recalculate`, daily targets and template conditions per load, time-on-today sensor.
+- Not implemented yet (see the design): zero-injection probing (the mode is detected and the engine stays paused), hourly net balance, services `force_on` / `force_off` / `recalculate`, template conditions per load, coordination with TankWise.
 - `tests/`: pytest with `pytest-homeassistant-custom-component`. `test_engine.py` covers the engine without Home Assistant; `test_config_flow.py` the config, options and load subentry flows; `test_coordinator.py` the loop inside Home Assistant (shadow mode, acting, manual changes, switches, delays). `conftest.py` creates the grid sensors. Register `async_mock_service` mocks **after** setting up the entry: loading the `switch` platform replaces earlier `switch.*` mocks.
 - `images/`: brand sources (`icon.svg`, `banner.svg`) and their PNG renders; the README shows `banner.png`.
 - `docs/design.md`: design document.

@@ -333,3 +333,34 @@ def test_regulable_not_eligible_gets_its_minimum() -> None:
 def test_regulable_is_never_switched() -> None:
     d = decide(NOW, Measurements(0, 3000), [replace(termo(1600), owned=True, global_ok=False)], CFG)
     assert d.action is Action.NONE and d.reasons["termo"] is Reason.GLOBAL_CONDITION
+
+
+def test_daily_target_reached_switches_off_and_is_reported() -> None:
+    loads = [pool(is_on=True, hours_today=7.0, target_hours=7.0), ac()]
+    d = decide(NOW, Measurements(1000, 0), loads, CFG)
+    assert d.reasons["pool"] is Reason.TARGET_REACHED and d.target_reached == {"pool"}
+    assert (d.action, d.load_id, d.reason) == (Action.TURN_OFF, "pool", Reason.TARGET_REACHED)
+    assert d.desired["ac"] is True  # the pool's power goes to the next load, which is not held back
+
+
+def test_daily_target_not_reached_yet() -> None:
+    d = decide(NOW, Measurements(1000, 0), [pool(hours_today=3.5, target_hours=7.0)], CFG)
+    assert d.reasons["pool"] is Reason.FITS and d.target_reached == frozenset()
+
+
+def test_daily_target_stays_reached_for_the_day() -> None:
+    # The target was raised, or the hours sensor dropped: still done until tomorrow
+    d = decide(NOW, Measurements(1000, 0), [pool(hours_today=2.0, target_hours=8.0, target_done=True)], CFG)
+    assert d.reasons["pool"] is Reason.TARGET_REACHED and d.action is Action.NONE
+
+
+def test_daily_target_respects_min_on_time() -> None:
+    load = pool(is_on=True, hours_today=7.0, target_hours=7.0, min_on=900, last_change=NOW - 60)
+    d = decide(NOW, Measurements(1000, 0), [load], CFG)
+    assert d.action is Action.NONE and d.reasons["pool"] is Reason.MIN_ON_TIME
+    assert d.target_reached == {"pool"}
+
+
+def test_regulable_with_target_reached_gets_its_minimum() -> None:
+    d = decide(NOW, Measurements(3000, 0), [replace(termo(500), hours_today=3, target_hours=2)], CFG)
+    assert d.reasons["termo"] is Reason.TARGET_REACHED and d.writes == {"termo": 0}

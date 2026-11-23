@@ -41,6 +41,7 @@ class Reason(StrEnum):
     NO_BUDGET = "no_budget"
     WAITING_HIGHER = "waiting_higher"
     NOT_ELIGIBLE = "not_eligible"
+    TARGET_REACHED = "target_reached"  # its daily target is met: not eligible until tomorrow
     MIN_ON_TIME = "min_on_time"
     MIN_OFF_TIME = "min_off_time"
     ON_DELAY = "on_delay"
@@ -122,6 +123,12 @@ class LoadState:
     on_since: float | None = None
     off_since: float | None = None
     regulator: Regulator | None = None  # only for regulable loads
+    # Daily target: hours on today and hours wanted (None: no target). Once reached it
+    # stays reached for the day: the caller stores it (Decision.target_reached) and
+    # passes it back as `target_done`.
+    hours_today: float | None = None
+    target_hours: float | None = None
+    target_done: bool = False
 
     @property
     def consumption(self) -> float:
@@ -131,6 +138,13 @@ class LoadState:
         if self.kind is not LoadKind.RELAY:
             return 0.0
         return self.nominal_w if self.is_on else 0.0
+
+    @property
+    def target_reached(self) -> bool:
+        """Whether its daily target is met."""
+        return self.target_done or (
+            self.target_hours is not None and self.hours_today is not None and self.hours_today >= self.target_hours
+        )
 
     @property
     def controlled(self) -> bool:
@@ -165,6 +179,7 @@ class Decision:
     off_since: dict[str, float] = field(default_factory=dict)  # loads whose switch-off condition holds
     limits: dict[str, float] = field(default_factory=dict)  # W, limit each regulable load should have
     writes: dict[str, float] = field(default_factory=dict)  # W, limits to write in this cycle
+    target_reached: frozenset[str] = frozenset()  # loads whose daily target is met
 
 
 def _since(previous: float | None, now: float) -> float:
@@ -271,6 +286,8 @@ def decide(
             # Its consumption is in the budget, so `remaining` is what it may take.
             if not load.eligible:
                 limits[load.id], reasons[load.id] = reg.minimum, Reason.NOT_ELIGIBLE
+            elif load.target_reached:
+                limits[load.id], reasons[load.id] = reg.minimum, Reason.TARGET_REACHED
             elif claimed:
                 limits[load.id] = min(max(remaining, reg.minimum), reg.maximum)
                 reasons[load.id] = Reason.LIMITED if limits[load.id] < reg.maximum else Reason.FULL_POWER
@@ -282,6 +299,10 @@ def decide(
         if not load.eligible:
             desired[load.id] = False
             reasons[load.id] = Reason.NOT_ELIGIBLE
+            continue
+        if load.target_reached:
+            desired[load.id] = False
+            reasons[load.id] = Reason.TARGET_REACHED
             continue
         if gap and load.no_skip:
             desired[load.id] = False
@@ -303,6 +324,7 @@ def decide(
             gap = True
 
     by_id = {load.id: load for load in loads}
+    reached = frozenset(i for i, reason in reasons.items() if reason is Reason.TARGET_REACHED)
     offs = sorted(
         (by_id[i] for i, on in desired.items() if not on and by_id[i].is_on),
         key=lambda load: (-load.priority, load.id),
@@ -319,7 +341,7 @@ def decide(
                reason: Reason = Reason.STEADY) -> Decision:
         return Decision(
             budget, action, load_id, reason, desired, reasons, on_since, off_since,
-            limits, _limit_writes(now, loads, limits),
+            limits, _limit_writes(now, loads, limits), reached,
         )
 
     if not offs and not ons:

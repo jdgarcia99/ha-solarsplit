@@ -19,6 +19,7 @@ from custom_components.solarsplit.const import (
     CONF_CONDITION_ENTITY,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_HOURS_SENSOR,
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
     CONF_LIMIT_ENTITY,
@@ -39,6 +40,8 @@ from custom_components.solarsplit.const import (
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
     CONF_STALE_TIMEOUT,
+    CONF_TARGET_ENTITY,
+    CONF_TARGET_HOURS,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
     LOAD_TYPE_REGULABLE,
@@ -436,7 +439,7 @@ async def test_entities_get_the_label(hass: HomeAssistant) -> None:
     label = lr.async_get(hass).async_get_label_by_name("Gestión de excedentes")
     assert label is not None
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 4 + 1 + 2 * 4  # loop sensors, master switch, 4 per load
+    assert len(entities) == 4 + 1 + 2 * 5  # loop sensors, master switch, 5 per load
     assert all(label.label_id in entity.labels for entity in entities)
 
 
@@ -621,3 +624,91 @@ async def test_regulable_with_unknown_data_is_left_alone(hass: HomeAssistant, en
     await _cycle(hass, entry, export=3000)
     assert _state(hass, entry, "load_state", TERMO) == "unavailable"
     assert calls == []
+
+
+def _morning(freezer: FrozenDateTimeFactory) -> None:
+    """Start the test at 10:00 local time."""
+    freezer.move_to(dt_util.start_of_local_day() + timedelta(hours=10))
+
+
+def _on_today(hass: HomeAssistant, entry: MockConfigEntry, entity: str) -> float:
+    return float(_state(hass, entry, "on_today", entity))
+
+
+async def test_time_on_today_counts_runs_and_resets_at_midnight(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+) -> None:
+    _morning(freezer)
+    entry = await _setup(hass, pool="on")
+    freezer.tick(timedelta(minutes=30))
+    await _cycle(hass, entry, export=1000)
+    assert _on_today(hass, entry, POOL) == pytest.approx(0.5)
+
+    hass.states.async_set(POOL, "off")
+    freezer.tick(timedelta(hours=1))
+    await _cycle(hass, entry, export=1000)
+    assert _on_today(hass, entry, POOL) == pytest.approx(0.5)
+
+    freezer.tick(timedelta(hours=12))  # 23:30, on again
+    hass.states.async_set(POOL, "on")
+    await _cycle(hass, entry, export=1000)
+    freezer.tick(timedelta(hours=1))  # 00:30 the next day: only the half hour after midnight
+    await _cycle(hass, entry, export=1000)
+    assert _on_today(hass, entry, POOL) == pytest.approx(0.5)
+    hass.states.async_set(POOL, "off")
+    await _cycle(hass, entry, export=1000)
+    assert _on_today(hass, entry, POOL) == pytest.approx(0.5)
+
+
+async def test_daily_target_with_own_count(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    _morning(freezer)
+    entry = await _setup(hass, shadow=False, pool="on", loads=[_load("Pool", POOL, 750, 1, **{CONF_TARGET_HOURS: 1})])
+    switch_on = async_mock_service(hass, "switch", "turn_on")
+    switch_off = async_mock_service(hass, "switch", "turn_off")
+    freezer.tick(timedelta(minutes=59))
+    await _cycle(hass, entry, export=1000)
+    assert switch_off == []
+
+    freezer.tick(timedelta(minutes=1))
+    await _cycle(hass, entry, export=1000)
+    assert [c.data["entity_id"] for c in switch_off] == [POOL]
+    hass.states.async_set(POOL, "off")
+    for _ in range(3):
+        freezer.tick(timedelta(hours=1))
+        await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_state", POOL) == "blocked"
+    assert _state(hass, entry, "load_reason", POOL) == "target_reached"
+    assert switch_on == []
+
+    freezer.tick(timedelta(hours=20))  # the next morning
+    await _cycle(hass, entry, export=3000)
+    assert [c.data["entity_id"] for c in switch_on] == [POOL]
+
+
+async def test_daily_target_from_entities(hass: HomeAssistant) -> None:
+    hours, target = "sensor.piscina_on_hoy", "input_number.horas_piscina"
+    hass.states.async_set(hours, "419", {"unit_of_measurement": "min"})
+    hass.states.async_set(target, "7.0")
+    entry = await _setup(hass, loads=[_load("Pool", POOL, 750, 1, **{CONF_HOURS_SENSOR: hours, CONF_TARGET_ENTITY: target})])
+    await _cycle(hass, entry, export=1000)
+    assert _state(hass, entry, "load_reason", POOL) == "fits"
+
+    hass.states.async_set(hours, "420", {"unit_of_measurement": "min"})
+    await _cycle(hass, entry, export=1000)
+    assert _state(hass, entry, "load_reason", POOL) == "target_reached"
+
+    hass.states.async_set(target, "8.0")  # raised later in the day: still done until tomorrow
+    await _cycle(hass, entry, export=1000)
+    assert _state(hass, entry, "load_reason", POOL) == "target_reached"
+
+
+@pytest.mark.parametrize("unknown", ["sensor.piscina_on_hoy", "input_number.horas_piscina"])
+async def test_daily_target_unknown_leaves_the_load(hass: HomeAssistant, unknown: str) -> None:
+    hours, target = "sensor.piscina_on_hoy", "input_number.horas_piscina"
+    hass.states.async_set(hours, "2", {"unit_of_measurement": "h"})
+    hass.states.async_set(target, "7")
+    hass.states.async_set(unknown, STATE_UNAVAILABLE)
+    entry = await _setup(hass, pool="on", loads=[_load("Pool", POOL, 750, 1, **{CONF_HOURS_SENSOR: hours, CONF_TARGET_ENTITY: target})])
+    await _cycle(hass, entry, imp=2000)
+    assert _state(hass, entry, "load_reason", POOL) == "condition_unknown"
+    assert _state(hass, entry, "last_decision") == "none"

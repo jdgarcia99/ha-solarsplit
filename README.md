@@ -9,7 +9,7 @@
 
 SolarSplit is a Home Assistant integration that shares your PV surplus among loads ordered by priority (pool pump, water heater, air conditioners, radiators…). One control loop replaces the usual pairs of on/off automations: every cycle it works out how much power is available, decides which loads should run, and makes at most one change, with hysteresis and minimum on/off times.
 
-> **Status: early development.** The control loop runs in **shadow mode**: it decides and publishes what it would do, without switching any load. Zero-injection probing, hourly net balance, services and per-load daily targets are not implemented yet. See the [design document](docs/design.md) (in Spanish) and the [changelog](CHANGELOG.md).
+> **Status: early development.** The control loop runs in **shadow mode**: it decides and publishes what it would do, without switching any load. Zero-injection probing, hourly net balance and services are not implemented yet. See the [design document](docs/design.md) (in Spanish) and the [changelog](CHANGELOG.md).
 
 ## How it works
 
@@ -42,7 +42,7 @@ All SolarSplit entities get the label **Gestión de excedentes**, created if it 
 
 Shadow mode is **on by default**. The loop runs every cycle and updates all its entities, but never calls a service on a load. Compare its decisions with your current automations for a while, then turn shadow mode off in the integration's settings. Turning a load's **Manage** switch off, or the master switch off, hands the load back to your automations at any time.
 
-Planned: zero-injection mode (probing loads when the inverter limits export), hourly net balance mode, `force_on` / `force_off` / `recalculate` services, and daily targets per load.
+Planned: zero-injection mode (probing loads when the inverter limits export), hourly net balance mode and `force_on` / `force_off` / `recalculate` services.
 
 ## Entities
 
@@ -64,6 +64,7 @@ One device per load:
 | State (sensor) | `on`, `off`, `waiting` (a change is wanted), `blocked`, `manual`, `unmanaged` or `unavailable`. |
 | Reason (sensor) | Why, for example `no_budget`, `on_delay`, `min_on_time` or `not_eligible`. |
 | Priority (number) | Applied on the fly, without reloading; also stored in the load's settings. |
+| Time on today (sensor, h) | Hours the load has been on today, counted by SolarSplit from the load's state (whoever switched it). Resets at local midnight and survives restarts. |
 
 Diagnostics (on the integration's menu) include the settings, every load and the last cycle.
 
@@ -176,6 +177,16 @@ Each load is a subentry: on the integration's page, use **Add load**, and edit o
 | Respect manual changes | on | If someone else switches the load, stop controlling it until it returns to the state SolarSplit set. |
 | Climate mode when on | cool | For `climate` entities. |
 | Regulated externally when | none | Relay loads only. While this entity is on, the load is never switched but its power counts. |
+
+The **Daily target** section of the form (collapsed unless a target is set):
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| Hours on today sensor | none | Hours the load has been on today (`h`, `min` or `s`). Empty: SolarSplit's own count, the load's *Time on today* sensor. |
+| Target hours entity | none | `input_number`, `number` or `sensor` with the hours wanted today. Takes precedence over the fixed value. |
+| Target hours | 0 | Fixed hours wanted per day when there is no target entity. 0: no daily target. |
+
+Once the hours on today reach the target, the load is not eligible until the next day (reason `target_reached`): SolarSplit switches it off after its minimum on time, and it stays `blocked` even if the target is raised later that day. A regulable load gets its minimum limit instead. Turning **Manage** off and on clears it. While the hours or the target cannot be read, the load is left as it is (`condition_unknown`).
 
 The **Regulable load** section of the form (collapsed unless the type is Regulable):
 
