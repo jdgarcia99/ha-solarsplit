@@ -18,7 +18,7 @@ Custom Home Assistant integration (domain `solarsplit`), distributed through HAC
   - `strings.json`, `translations/en.json`, `translations/es.json`: UI text, including entity names and enum states.
   - `brand/`: `icon.png` and `icon@2x.png`, copied from `images/`.
 - Not implemented yet (see the design): zero-injection probing (the mode is detected and the engine stays paused), hourly net balance, services `force_on` / `force_off` / `recalculate`, template conditions per load, coordination with TankWise.
-- `tests/`: pytest with `pytest-homeassistant-custom-component`. `test_engine.py` covers the engine without Home Assistant; `test_config_flow.py` the config, options and load subentry flows; `test_coordinator.py` the loop inside Home Assistant (shadow mode, acting, manual changes, switches, delays). `conftest.py` creates the grid sensors. Register `async_mock_service` mocks **after** setting up the entry: loading the `switch` platform replaces earlier `switch.*` mocks.
+- `tests/`: pytest with `pytest-homeassistant-custom-component`. `test_engine.py` covers the engine without Home Assistant; `test_config_flow.py` the config, options and load subentry flows; `test_coordinator.py` the loop inside Home Assistant (shadow mode, acting, manual changes, switches, delays); `test_translations.py` the coverage of the three translation files. `conftest.py` creates the grid sensors. Register `async_mock_service` mocks **after** setting up the entry: loading the `switch` platform replaces earlier `switch.*` mocks.
 - `images/`: brand sources (`icon.svg`, `banner.svg`) and their PNG renders; the README shows `banner.png`.
 - `docs/design.md`: design document.
 - `CHANGELOG.md`: one section per version.
@@ -36,6 +36,7 @@ The water heater's safety (the Shelly cutting `switch.termo`) is independent of 
 - Code, comments, docstrings, README, release notes and commit messages are in **English**. The design document is in Spanish.
 - The user interface is translated: every user-facing string lives in `translations/en.json` and `translations/es.json`. Never hard-code UI text in Python; the engine returns `Reason` codes that the UI translates.
 - `strings.json` must be **identical** to `translations/en.json`. When a string changes, update `strings.json`, `en.json` and `es.json` together.
+- **Every new feature adds its texts to the three files** (`strings.json`, `en.json`, `es.json`) in the same change: form fields (label and description, in both steps), sections, entity names, enum states, attribute names (`state_attributes`) and, where an attribute holds a code, its values, and every new `Reason` code. `tests/test_translations.py` fails if the three files do not have exactly the same keys, or if an enum state, selector option, reason code, form field or entity lacks its text.
 
 ### Configuration
 - Everything configurable goes in the **config flow, the options flow or a load subentry**. No YAML configuration.

@@ -2,6 +2,8 @@
 
 ## 0.2.0 (unreleased)
 
+- Translations of the attributes of *Last decision* (`load`, `reason` with every reason code, `budget`, `shadow`) and of each load's *State* (`power`, `limit`), in English and Spanish. A test checks that `strings.json`, `en.json` and `es.json` have the same keys and that every enum state, selector option, reason code, form field and entity has its text.
+
 - Fix: the load form's sections came with an empty default, so the frontend sent them empty: their fields showed blank and editing a load cleared its optional entities (a regulable load could not be saved again). Sections are now required and without a default, like in Home Assistant core; the frontend fills them from their fields.
 - Loads **only on demand** (*Manual control and season* section): a load switched on by anything but SolarSplit starts a request, and switched off by anything but SolarSplit ends it. With a request it is managed by priority (switched off without surplus, after its delays and minimum on time, and on again when the surplus returns; that switch-off keeps the request); without one it is never switched on (reason `waiting_request`) and its power is not reassigned. A climate gets back its HVAC mode, target temperature and fan mode from the request. Replaces *Respect manual changes* for that load. New binary sensor *Request active*; the request is kept in the store.
 - **Manage again automatically**: with Manage switched off, it switches back on by itself when the load goes off or at a configurable local time (00:00 by default). With Manage off the load's power is not reassigned.

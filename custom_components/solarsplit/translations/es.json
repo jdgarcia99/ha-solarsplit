@@ -346,6 +346,51 @@
           "none": "Ninguna",
           "turn_on": "Encender",
           "turn_off": "Apagar"
+        },
+        "state_attributes": {
+          "load": {
+            "name": "Carga"
+          },
+          "reason": {
+            "name": "Motivo",
+            "state": {
+              "paused": "En pausa",
+              "settling": "Esperando a que se asiente el último cambio",
+              "steady": "Sin cambios",
+              "fits": "Cabe en el excedente",
+              "no_budget": "Excedente insuficiente",
+              "waiting_higher": "Esperando a cargas de más prioridad",
+              "not_eligible": "Condición de uso no cumplida",
+              "min_on_time": "Tiempo mínimo encendida",
+              "min_off_time": "Tiempo mínimo apagada",
+              "on_delay": "Retardo de encendido",
+              "off_delay": "Retardo de apagado",
+              "manual": "Cambiada a mano",
+              "unmanaged": "No gestionada",
+              "unavailable": "No disponible",
+              "global_condition": "Condición global apagada",
+              "variable": "Regulada externamente",
+              "global_shutdown": "Condición global apagada: se apaga",
+              "grid_unknown": "Lectura de red ausente o congelada",
+              "mode_unknown": "Entidad de inyección cero desconocida",
+              "global_unknown": "Condición global desconocida",
+              "condition_unknown": "Condición de uso desconocida",
+              "switched_off": "Apagada desde fuera",
+              "external": "Regulada por el dispositivo fuera de su modo automático",
+              "full_power": "Potencia máxima: nada por delante",
+              "limited": "Limitada a lo que dejan las cargas anteriores",
+              "target_reached": "Objetivo diario cumplido",
+              "waiting_request": "Esperando una petición",
+              "out_of_season": "Fuera de temporada",
+              "season_unknown": "Temporada desconocida"
+            }
+          },
+          "budget": {
+            "name": "Presupuesto"
+          },
+          "shadow": {
+            "name": "Modo sombra"
+          }
         }
       },
       "load_state": {
@@ -359,6 +404,14 @@
           "unmanaged": "No gestionada",
           "unavailable": "No disponible",
           "external": "Externa"
+        },
+        "state_attributes": {
+          "power": {
+            "name": "Potencia"
+          },
+          "limit": {
+            "name": "Límite de potencia"
+          }
         }
       },
       "load_reason": {
