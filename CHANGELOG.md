@@ -2,6 +2,7 @@
 
 ## 0.2.0 (unreleased)
 
+- After a restart, before the first cycle, a regulable load outside its automatic mode whose limit SolarSplit had lowered (according to the saved memory) gets its maximum back, so a restart does not leave a manual heater boost held back. With unknown grid readings the maximum is also given back to regulable loads outside automatic mode or not managed. A limit already at its maximum is not written again.
 - Shadow mode never writes a regulable load's limit, not to lower it nor to give it back: the check sits in the one function that writes it. A test covers every path (cycle, switches, unload, start).
 - Docs: the water heater is a regulable load behind the x10derivador (FreeDS is gone), with its configuration in the README; its safety cut (the Shelly) is independent of SolarSplit and is not implemented in it.
 - Daily target per load, in a collapsible *Daily target* section: hours on today sensor (or SolarSplit's own count), target hours from an entity (`input_number`, `number` or `sensor`) or a fixed value. Once reached, the load is not eligible until the next day (reason `target_reached`) and is switched off after its minimum on time.

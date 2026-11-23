@@ -200,7 +200,7 @@ def _limit_writes(now: float, loads: list[LoadState], limits: dict[str, float]) 
         if (reg := load.regulator) is None or not load.available:
             continue
         if (target := limits.get(load.id)) is None:
-            if reg.lowered:
+            if reg.lowered and reg.current < reg.maximum:
                 writes[load.id] = reg.maximum
             continue
         change = abs(target - reg.current)
@@ -239,7 +239,9 @@ def decide(
     if not active:
         return Decision(budget, reason=pause_reason, writes=_limit_writes(now, loads, {}))
     if budget is None:
-        return Decision(budget, reason=Reason.GRID_UNKNOWN)
+        # Giving back the limit of a load SolarSplit no longer limits needs no grid reading.
+        released = [load for load in loads if load.regulator and (not load.managed or not load.regulator.auto)]
+        return Decision(budget, reason=Reason.GRID_UNKNOWN, writes=_limit_writes(now, released, {}))
 
     desired: dict[str, bool] = {}
     reasons: dict[str, Reason] = {}

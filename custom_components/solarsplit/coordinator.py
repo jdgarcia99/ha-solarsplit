@@ -443,6 +443,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             kind = LoadKind.REGULABLE
             auto = entity_has_state(self._state(load.mode_entity), load.auto_state)
             current = read_number(self._state(load.limit_entity))
+            if current is not None and current >= load.limit_max:
+                memory.lowered = False  # back at its maximum, whoever put it there
             available = None not in (is_on, auto, current, actual_w)
             regulator = Regulator(
                 auto=bool(auto), current=current or 0.0, minimum=load.limit_min, maximum=load.limit_max,
@@ -573,6 +575,23 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         now = dt_util.utcnow().timestamp()
         for load in self.loads:
             if load.regulable and self.memory[load.id].lowered:
+                await self._async_write_limit(load, load.limit_max, now)
+
+    async def async_release_on_start(self) -> None:
+        """Before the first cycle, give back the limit of regulable loads left outside automatic mode.
+
+        A restart must not leave a heater boost in Manual mode held at a limit SolarSplit
+        set before. Only a limit the saved memory says SolarSplit lowered is written, and
+        only when the mode and the limit can be read; the cycle handles the rest.
+        """
+        now = dt_util.utcnow().timestamp()
+        for load in self.loads:
+            memory = self.memory[load.id]
+            if not load.regulable or not memory.lowered:
+                continue
+            auto = entity_has_state(self._state(load.mode_entity), load.auto_state)
+            current = read_number(self._state(load.limit_entity))
+            if auto is False and current is not None and current < load.limit_max:
                 await self._async_write_limit(load, load.limit_max, now)
 
     @staticmethod

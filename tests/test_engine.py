@@ -315,7 +315,11 @@ def test_regulable_limit_is_restored_when_solarsplit_lets_go() -> None:
     assert [d.writes for d in cases] == [{"termo": 1600}] * 4
     # Only a limit SolarSplit lowered is restored, and never on unknown data
     assert decide(NOW, Measurements(0, 0), [termo(auto=False, current=300)], CFG).writes == {}
-    assert decide(NOW, None, [termo(auto=False, **lowered)], CFG).writes == {}
+    assert decide(NOW, Measurements(0, 0), [termo(auto=False, current=1600, lowered=True)], CFG).writes == {}
+    # Unknown grid: a limit still in use is left as it is; one SolarSplit no longer uses is given back
+    assert decide(NOW, None, [termo(**lowered)], CFG).writes == {}
+    assert decide(NOW, None, [termo(auto=False, **lowered)], CFG).writes == {"termo": 1600}
+    assert decide(NOW, None, [replace(termo(**lowered), managed=False)], CFG).writes == {"termo": 1600}
     unavailable = replace(termo(auto=False, **lowered), available=False)
     assert decide(NOW, Measurements(0, 0), [unavailable], CFG).writes == {}
 

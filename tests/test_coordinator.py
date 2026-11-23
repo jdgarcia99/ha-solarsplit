@@ -768,3 +768,35 @@ async def test_shadow_mode_never_writes_the_limit(
 
     assert calls == [] and late_calls == []
     assert coordinator.memory[_sid(TERMO)].lowered is True  # nothing was written, nothing forgotten
+
+
+async def test_restart_gives_back_the_limit_in_manual_mode(
+    hass: HomeAssistant, hass_storage: dict, freezer: FrozenDateTimeFactory
+) -> None:
+    _saved_termo(hass_storage, freezer().timestamp())
+    hass.states.async_set(EXPORT, STATE_UNAVAILABLE)  # the grid is not up yet: no cycle could do it
+    calls = async_mock_service(hass, "number", "set_value")
+    entry, late_calls = await _setup_termo(hass, limit=400, mode="Manual")
+    assert _limits(calls) == [(LIMIT, 1600)] and late_calls == []
+    assert entry.runtime_data.memory[_sid(TERMO)].lowered is False
+    assert _state(hass, entry, "load_reason", POOL) == "grid_unknown"
+
+
+@pytest.mark.parametrize(
+    ("mode", "limit", "lowered"),
+    [
+        ("Auto", 400, True),  # still limited by SolarSplit: the cycle decides
+        ("Manual", 400, False),  # someone else set it: not ours to change
+        ("Manual", 1600, True),  # already at its maximum
+        (STATE_UNAVAILABLE, 400, True),  # mode unknown: the cycle gives it back once it is known
+    ],
+)
+async def test_restart_leaves_other_limits(
+    hass: HomeAssistant, hass_storage: dict, freezer: FrozenDateTimeFactory, mode: str, limit: float, lowered: bool
+) -> None:
+    _saved_termo(hass_storage, freezer().timestamp(), lowered=lowered)
+    hass.states.async_set(EXPORT, STATE_UNAVAILABLE)
+    calls = async_mock_service(hass, "number", "set_value")
+    entry, _ = await _setup_termo(hass, limit=limit, mode=mode)
+    assert calls == []
+    assert entry.runtime_data.memory[_sid(TERMO)].lowered is (lowered and limit < 1600)
