@@ -121,7 +121,7 @@
             "condition_state": "Estado que debe tener la entidad de condición de uso, por ejemplo on.",
             "respect_manual": "Si otro cambia la carga, SolarSplit deja de controlarla hasta que vuelva al estado que él puso.",
             "hvac_mode": "Solo para entidades de climatización.",
-            "variable_entity": "Mientras esta entidad esté encendida (por ejemplo FreeDS maestro), la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta.",
+            "variable_entity": "Solo cargas de relé. Mientras esta entidad esté encendida, la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta. Para un derivador, usa el tipo Regulable.",
             "load_type": "Relé: SolarSplit la enciende y la apaga. Regulable: el dispositivo se regula solo (un derivador) y SolarSplit solo escribe su límite de potencia; rellena la sección Carga regulable."
           },
           "sections": {
@@ -200,7 +200,7 @@
             "condition_state": "Estado que debe tener la entidad de condición de uso, por ejemplo on.",
             "respect_manual": "Si otro cambia la carga, SolarSplit deja de controlarla hasta que vuelva al estado que él puso.",
             "hvac_mode": "Solo para entidades de climatización.",
-            "variable_entity": "Mientras esta entidad esté encendida (por ejemplo FreeDS maestro), la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta.",
+            "variable_entity": "Solo cargas de relé. Mientras esta entidad esté encendida, la carga se regula fuera: SolarSplit no la conmuta, pero su consumo cuenta. Para un derivador, usa el tipo Regulable.",
             "load_type": "Relé: SolarSplit la enciende y la apaga. Regulable: el dispositivo se regula solo (un derivador) y SolarSplit solo escribe su límite de potencia; rellena la sección Carga regulable."
           },
           "sections": {

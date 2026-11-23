@@ -97,7 +97,7 @@ To update later, download the update HACS shows and restart again. The loop's me
    - **Grid import sensor**: power imported from the grid, in W, from the same meter.
    - **Global condition** (*Condición global*): `input_boolean.casa_activada`.
    - **PV power sensor** and **Zero-injection mode entity**: optional. Zero-injection probing is not implemented yet; while that entity is on, the loop pauses and leaves every load alone.
-   - Keep the loop defaults (5 s cycle, 100 W safety margin, 30 s smoothing and settle time, 100 W switch-on margin, 150 W import tolerance).
+   - Keep the loop defaults (5 s cycle, 100 W safety margin, 30 s smoothing and settle time, 100 W switch-on margin, 150 W import tolerance, 20 s stale data timeout).
    - **Shadow mode** (*Modo sombra*): **leave it ticked**.
 3. Submit. A **SolarSplit** service device appears with the master switch and the loop sensors.
 
@@ -108,10 +108,11 @@ On **Settings → Devices & services → SolarSplit**, click **Add load** (*Aña
 | Field | What to enter |
 | --- | --- |
 | **Name** | As you want to see it, e.g. *Depuradora*. |
+| **Load type** | *Relay* for everything SolarSplit switches; *Regulable* for the water heater behind the diverter (see below). |
 | **Entity** | The `switch`, `input_boolean` or `climate` entity that turns it on and off. |
 | **Nominal power** | What it really draws when on, in W. |
 | **Power sensor** | Its power meter, if it has one: used instead of the nominal power. |
-| **Priority** | 1 is served first. Give the water heater a high priority so FreeDS gets the surplus first. |
+| **Priority** | 1 is served first. |
 | **Do not skip** (*No saltar*) | Tick on loads that may only start when every eligible load before them is on (today's rule for the air conditioners). |
 | **Switch-on / switch-off delay** | The delays your automations use today (`for:` of their triggers). |
 | **Minimum on / off time** | Protection for compressors and pumps; keep at least 5 min for air conditioners and the pool pump. |
@@ -119,7 +120,32 @@ On **Settings → Devices & services → SolarSplit**, click **Add load** (*Aña
 | **Usage condition entity / state** | E.g. `input_boolean.climatizar_casa` / `on` for the air conditioners. |
 | **Respect manual changes** | Leave ticked. |
 | **Climate mode when on** | Only for `climate` entities (usually `cool`). |
-| **Regulated externally when** | For the water heater: the FreeDS master switch. While it is on, SolarSplit never switches the heater but counts its power. |
+| **Regulated externally when** | Leave empty (it was for the heater with FreeDS; the heater is now a regulable load). |
+| **Daily target** | For the pool pump: *Hours on today sensor* `sensor.piscina_on_hoy` and a *Target hours entity* with today's hours. The hours per season live in `input_number.horas_invierno_piscina` and `input_number.horas_verano_piscina`, chosen by `input_select.temporada_piscina`: give SolarSplit one entity, such as a template sensor helper that picks the right one. |
+
+#### The water heater with the x10derivador
+
+The heater's diverter (x10derivador, ESPHome) regulates the heater itself, aiming at a grid target (`number.coladuria_x10_derivador_objetivo_de_red`, −50 W: it keeps about 50 W of export). SolarSplit does not switch it; it lets the diverter take the surplus that the loads ahead of it leave, by writing the diverter's maximum power. Add it as a regulable load:
+
+| Field | Value |
+| --- | --- |
+| **Name** | Termo |
+| **Load type** | Regulable |
+| **Entity** | `switch.termo` (the Shelly Pro 1PM in front of the diverter). SolarSplit never switches it; while it is off the heater is `blocked`. |
+| **Nominal power** | 1600 W |
+| **Power sensor** | `sensor.termo_power`: the Shelly's real measurement, not the diverter's estimate (`sensor.coladuria_x10_derivador_potencia_al_termo_estimada`). |
+| **Priority** | After the loads that must get the surplus first (for example 2, after the pool pump). With priority 1 it stays at its maximum and takes the surplus first. |
+| **Respect the global condition** | Ticked: with the house empty SolarSplit stops limiting it and gives it its maximum back; the diverter keeps regulating on its own. |
+| ***Regulable load* section** | |
+| Limit entity | `number.coladuria_x10_derivador_potencia_maxima` |
+| Mode entity | `select.coladuria_x10_derivador_modo` |
+| Automatic mode value | `Auto` (the other options, `Manual` and `Apagado`, make the load `external`: its power is grid power) |
+| Minimum / maximum limit | 0 / 1600 W (the heater's element) |
+| Smallest change written / minimum time between writes | 100 W / 30 s |
+
+Leave `switch.coladuria_x10_derivador_modo_manual`, the grid target and `sensor.coladuria_x10_derivador_consigna` to the diverter: SolarSplit only reads the mode select and writes the maximum power.
+
+> **Safety.** The heater's protection (the Shelly cutting `switch.termo`) is independent of SolarSplit and must stay that way: SolarSplit never implements it, never switches `switch.termo`, and while it is off the heater is `blocked`. SolarSplit can only lower the diverter's maximum power, and it gives it back when it stops managing the heater.
 
 Every load gets its own device with **Manage**, **State**, **Reason** and **Priority**. To change a load later, use its **⋮ → Reconfigure** on the integration page; the integration reloads without losing its memory. Priority can also be changed from its entity, at once.
 

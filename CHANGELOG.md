@@ -2,6 +2,7 @@
 
 ## 0.2.0 (unreleased)
 
+- Docs: the water heater is a regulable load behind the x10derivador (FreeDS is gone), with its configuration in the README; its safety cut (the Shelly) is independent of SolarSplit and is not implemented in it.
 - Daily target per load, in a collapsible *Daily target* section: hours on today sensor (or SolarSplit's own count), target hours from an entity (`input_number`, `number` or `sensor`) or a fixed value. Once reached, the load is not eligible until the next day (reason `target_reached`) and is switched off after its minimum on time.
 - New per-load sensor *Time on today* (h): SolarSplit's own count of the hours the load was on today, reset at local midnight, kept across restarts.
 - New load type **Regulable** (for example a water heater behind a diverter), configured in a collapsible *Regulable load* section of the load form: power sensor, limit entity, mode entity and its automatic value, minimum and maximum limit, smallest change written (100 W) and minimum time between writes (30 s). In automatic mode its power counts in the budget and SolarSplit writes its limit: the maximum when nothing ahead of it uses the budget, otherwise what the loads ahead leave (reasons `full_power`, `limited`). In any other mode it is `external` and its power is grid power. SolarSplit never switches it; with its switch off it is blocked. The maximum is written back when SolarSplit stops limiting it (master switch, Manage, other mode, global condition, unload). The State sensor shows the limit as an attribute.

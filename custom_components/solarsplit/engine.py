@@ -14,7 +14,7 @@ class LoadKind(StrEnum):
     """How the engine treats a load."""
 
     RELAY = "relay"  # switched on and off by the engine
-    VARIABLE = "variable"  # regulated elsewhere (FreeDS); only its consumption counts
+    VARIABLE = "variable"  # regulated elsewhere while its variable entity is on; only its consumption counts
     REGULABLE = "regulable"  # regulates itself; the engine sets its power limit
 
 

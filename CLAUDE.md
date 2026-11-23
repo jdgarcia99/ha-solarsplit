@@ -27,6 +27,8 @@ Custom Home Assistant integration (domain `solarsplit`), distributed through HAC
 
 The integration switches real devices (pool pump, air conditioners, water heater). Compressors and pumps must be protected by minimum on/off times; when in doubt, do nothing and report the reason. The control loop never switches loads off because it is paused (master switch off, unknown mode): it leaves them as they are. The only exception is the global condition: when it fails, it switches off the relay loads it switched on itself that respect the condition (`global_shutdown`), still honouring the minimum on time; manual loads are left alone. Shadow mode is on by default and must stay the default: a new install never acts until the user turns it off.
 
+The water heater's safety (the Shelly cutting `switch.termo`) is independent of SolarSplit and must never be implemented in it. A regulable load is never switched; SolarSplit only writes its power limit and gives the maximum back when it stops managing it. A load switched off by something else is never switched back on. Unknown or frozen data is unknown, never 0 W.
+
 ## Conventions
 
 ### Language

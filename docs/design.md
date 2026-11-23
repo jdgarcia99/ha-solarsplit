@@ -17,7 +17,8 @@ Una integración HACS propia (**SolarSplit**, dominio `solarsplit`) sustituye a 
 **No hace (se queda en automatizaciones o en otros sistemas):**
 
 - Activar o desactivar inyección cero en el Fronius, ni la lógica de precio PVPC (umbral de 5 céntimos, amanecer). La integración solo **lee** el modo activo.
-- La regulación proporcional del termo: la sigue haciendo FreeDS.
+- La regulación proporcional del termo: la hace el x10derivador (firmware ESPHome propio). SolarSplit solo le escribe la potencia máxima (carga regulable).
+- La seguridad del termo (el corte del Shelly Pro 1PM, `switch.termo`): es independiente de SolarSplit y **no debe implementarse en ella**. SolarSplit nunca conmuta `switch.termo`.
 - Leer el IoTaWatt: lo hace IoTaWatt Plus. Esta integración consume sus sensores.
 
 ## Situación actual
@@ -27,7 +28,7 @@ Hay 21 automatizaciones con la etiqueta «Gestión de excedentes». Las de repar
 | Carga | Entidad | Encender | Apagar | Condiciones extra |
 | --- | --- | --- | --- | --- |
 | Depuradora | `switch.depuradora_piscina` | `binary_sensor.auth_piscina` 5 min | autom. propia | horas por temporada, hora de inicio opcional |
-| Termo | `switch.termo` | > `excedente_activacion_termo` | < `excedente_apagado_termo` | `freeds_maestro` off, `casa_activada`; modo balance neto horario |
+| Termo | `switch.termo` | > `excedente_activacion_termo` | < `excedente_apagado_termo` | `freeds_maestro` off, `casa_activada`; modo balance neto horario (antes de 0.2.0: FreeDS; ahora x10derivador, ver «Termo y x10derivador») |
 | Aires P0 (Sara, Juande Jr, Annabel) | `climate.ac_*` | > 1500 W 5 min | < 50 W 30 s | depuradora y termo encendidos, `climatizar_casa` |
 | Aire P1 (Salón) | `climate.ac_salon` | > 600 W 1 min | autom. propia | igual que P0 |
 | Radiador baño | `switch.radiador_bano_piso` | > `excedente_activacion_radiador` 1 min | autom. propia | `secar_ropa_bano_piso`, `casa_activada` |
@@ -57,12 +58,14 @@ Una entrada principal (config entry) con la configuración global, y una **suben
 | Entidad de modo inyección cero | `input_boolean.zero_injection` | cambia la estrategia |
 | Entidad de balance neto horario | `input_boolean.balance_neto_horario` + sensor | modo alternativo |
 | Condición global | `input_boolean.casa_activada` | bloquea todo si está off |
+| Tiempo de datos congelados (s) | 20 | lectura de red sin informar = desconocida (0.2.0) |
 
 **Configuración por carga:**
 
 | Campo | Tipo | Ejemplo (depuradora) |
 | --- | --- | --- |
 | Nombre | texto | Depuradora |
+| Tipo de carga | relé o regulable (0.2.0) | relé |
 | Entidad | switch, climate o input\_boolean | `switch.depuradora_piscina` |
 | Acción encender / apagar | según dominio (`switch.turn_on`, `climate.set_hvac_mode: cool`…) | automático por dominio |
 | Potencia nominal (W) | número | 750 |
@@ -73,6 +76,7 @@ Una entrada principal (config entry) con la configuración global, y una **suben
 | Condición de uso | selector de entidad + estado, o plantilla | horas de piscina pendientes |
 | Objetivo diario | sensor de horas + entidad con el máximo | `sensor.piscina_on_hoy` < `horas_*_piscina` |
 | Respeta encendido manual | sí / no | sí |
+| Carga regulable: entidad de límite, entidad de modo y valor automático, límite mínimo y máximo, cambio mínimo, tiempo entre escrituras | sección plegable (0.2.0) | termo: `number.coladuria_x10_derivador_potencia_maxima`, `select.coladuria_x10_derivador_modo` = `Auto`, 0–1600 W, 100 W, 30 s |
 
 Los parámetros que hoy son `input_number` (umbrales del termo, del radiador, horas de piscina) pasan a ser campos de la carga. Los que cambian a menudo según temporada se pueden seguir leyendo de un `input_number` si lo prefieres.
 
@@ -178,20 +182,36 @@ El atributo de diagnóstico de cada ciclo (presupuesto, cargas evaluadas, decisi
   - **Escrituras.** El motor devuelve el límite deseado (`Decision.limits`) y las escrituras de este ciclo (`Decision.writes`): solo si el cambio llega al umbral o alcanza un extremo, y no antes del intervalo desde la última escritura (`Regulator.written`, que guarda el coordinador). El adaptador redondea hacia abajo al paso de la entidad y lo acota a su rango. Las escrituras no cuentan como la única acción de conmutación del ciclo.
   - **Devolución del máximo.** Si SolarSplit la bajó (`lowered`) y deja de limitarla (pausa o interruptor maestro, Gestionar apagado, otro modo, condición global apagada, interruptor apagado), el motor escribe el máximo en el acto. Al descargar o desactivar la entrada lo hace el coordinador. Solo se devuelve lo que SolarSplit bajó, para no pisar un valor puesto a mano. Con datos de red desconocidos no se escribe nada.
   - **Nunca se conmuta.** Su entidad es el interruptor que tiene delante (`switch.termo`): SolarSplit no lo toca; si está apagado, la carga queda bloqueada (`switched_off`). Con potencia, límite o modo ilegibles, no disponible: no se escribe.
-- **Termo con FreeDS:** la carga tiene un campo «Regulada externamente cuando» (`freeds_maestro`). Con esa entidad encendida es una carga variable; apagada, un relé normal.
+- **Termo con FreeDS (0.1.0, sustituido):** la carga tenía un campo «Regulada externamente cuando» (`freeds_maestro`). FreeDS ya no existe; el campo se mantiene para otras cargas variables, y el termo pasa a ser una carga regulable (ver «Termo y x10derivador»).
 - **Objetivo diario (0.2.0).** Sección plegable «Objetivo diario» de la subentrada: sensor de horas hoy (opcional; vacío = cuenta propia), entidad con las horas objetivo (`input_number`, `number` o `sensor`) o un valor fijo (0 = sin objetivo). El motor recibe `hours_today`, `target_hours` y `target_done`; si las horas llegan al objetivo, la carga deja de ser elegible (motivo `target_reached`): se apaga respetando el tiempo mínimo encendida y no cuenta como hueco para «no saltar». Una regulable recibe su límite mínimo. El motor devuelve `Decision.target_reached` y el coordinador guarda la fecha local en la memoria: queda cumplido **hasta el día siguiente**, aunque luego suba el objetivo o baje el sensor. Reactivar Gestionar lo borra. Con horas u objetivo ilegibles (y sin cumplir hoy), la condición es desconocida y la carga se deja como esté.
 - **Tiempo encendida hoy (0.2.0).** Sensor por carga (h, `total_increasing`) contado por el coordinador a partir del estado real de la carga, la encienda quien la encienda: suma de los tramos cerrados de hoy más el tramo en curso desde la medianoche local como muy pronto. Va en la memoria persistente (`today`, `on_today`), así que sobrevive a reinicios; se pone a cero al cambiar la fecha local. Es la cuenta que usa el objetivo diario si no se indica sensor de horas.
 - **Pendiente:** sondeo en inyección cero (el modo se detecta y el motor queda en pausa), balance neto horario, servicios, condiciones por plantilla y coordinación con TankWise.
 
 ## Casos especiales
 
-**Termo y FreeDS.** Con `freeds_maestro` encendido, FreeDS regula el termo de forma proporcional y la integración no debe tocarlo. El termo se declara como **carga variable**: no se enciende ni apaga, pero su consumo real cuenta en el presupuesto. Las cargas de menor prioridad solo reciben lo que FreeDS no esté usando, y conviene darle al termo una prioridad alta para que FreeDS se quede el excedente primero. Con `freeds_maestro` apagado, el termo pasa a ser una carga de relé normal con su umbral.
+**Termo y x10derivador (0.2.0).** FreeDS ya no existe. El termo lo regula el x10derivador, con firmware ESPHome propio, que apunta a un objetivo de red (`number.coladuria_x10_derivador_objetivo_de_red`, −50 W: regula para exportar unos 50 W). El termo se declara como **carga regulable**:
 
-Las dos automatizaciones de FreeDS manual en inyección cero (calentar si baja de 36 °C) no son reparto de excedente sino una regla de confort. Se quedan como automatizaciones.
+| Campo | Valor |
+| --- | --- |
+| Entidad | `switch.termo` (Shelly Pro 1PM delante del derivador) |
+| Sensor de potencia | `sensor.termo_power` (medida real del Shelly; no la estimación del derivador) |
+| Entidad de límite | `number.coladuria_x10_derivador_potencia_maxima` (0–3500 W, paso 50) |
+| Entidad de modo / valor automático | `select.coladuria_x10_derivador_modo` / `Auto` (opciones `Apagado`, `Auto`, `Manual`) |
+| Límite mínimo / máximo | 0 / 1600 W |
+
+- En `Auto` su consumo es excedente y SolarSplit le escribe la potencia máxima según su prioridad: el máximo si nada va por delante, o lo que dejan las cargas anteriores.
+- En `Manual` o `Apagado` su consumo es de red: carga «externa», no se reasigna.
+- `switch.coladuria_x10_derivador_modo_manual`, el objetivo de red y `sensor.coladuria_x10_derivador_consigna` son del derivador; SolarSplit no los usa.
+
+**Seguridad del termo.** El corte del Shelly es independiente de SolarSplit y no debe implementarse en ella: ni temperaturas, ni tiempos máximos, ni rearmes. SolarSplit nunca conmuta `switch.termo`; si está apagado, la carga queda bloqueada (`switched_off`). Lo único que puede hacer es bajar la potencia máxima del derivador, y la devuelve al dejar de gestionar el termo.
+
+**Coordinación con TankWise:** pendiente, no implementada.
+
+Las dos automatizaciones de calentar en inyección cero si baja de 36 °C no son reparto de excedente sino una regla de confort. Se quedan como automatizaciones.
 
 **Aires.** Hoy P0 enciende tres equipos a la vez. En la integración cada aire es una carga independiente (Sara, Juande Jr, Annabel, Salón) con su potencia, de modo que entran de uno en uno según haya presupuesto. Tiempo mínimo encendido sugerido: 15 min, para no castigar el compresor. Condición de uso: `input_boolean.climatizar_casa`. Acción: `climate.set_hvac_mode` con `cool` u `off`; en invierno se podría usar `heat` con un selector de modo por temporada.
 
-**Depuradora.** Condición de uso = horas pendientes según `input_select.temporada_piscina` y `sensor.piscina_on_hoy`, y hora de inicio opcional. `binary_sensor.auth_piscina` deja de hacer falta: lo sustituye el presupuesto. La automatización de cambio de temporada se queda.
+**Depuradora.** Objetivo diario (0.2.0): sensor de horas `sensor.piscina_on_hoy` y entidad de horas objetivo; las horas por temporada (`input_number.horas_invierno_piscina`, `input_number.horas_verano_piscina`, según `input_select.temporada_piscina`) se dan a SolarSplit en una sola entidad (por ejemplo un ayudante de plantilla). Hora de inicio opcional: pendiente. `binary_sensor.auth_piscina` deja de hacer falta: lo sustituye el presupuesto. La automatización de cambio de temporada se queda.
 
 **Inyección cero.** La integración lee `input_boolean.zero_injection` y cambia al modo de sondeo. Las automatizaciones que activan y desactivan la inyección cero (precio, amanecer, auto activación con termo caliente) se quedan fuera, porque son decisiones económicas, no de reparto.
 
