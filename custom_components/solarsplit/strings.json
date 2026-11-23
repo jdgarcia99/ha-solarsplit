@@ -19,7 +19,8 @@
           "settle_time": "Settle time",
           "on_margin": "Switch-on margin",
           "import_tolerance": "Import tolerance",
-          "shadow_mode": "Shadow mode"
+          "shadow_mode": "Shadow mode",
+          "stale_timeout": "Stale data timeout"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. Main signal of the loop.",
@@ -33,7 +34,8 @@
           "settle_time": "Wait after a change before the next one.",
           "on_margin": "Extra power a load needs, above its own, to be switched on.",
           "import_tolerance": "Grid import tolerated before a load is switched off.",
-          "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right."
+          "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right.",
+          "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check."
         }
       }
     }
@@ -54,7 +56,8 @@
           "settle_time": "Settle time",
           "on_margin": "Switch-on margin",
           "import_tolerance": "Import tolerance",
-          "shadow_mode": "Shadow mode"
+          "shadow_mode": "Shadow mode",
+          "stale_timeout": "Stale data timeout"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. Main signal of the loop.",
@@ -68,7 +71,8 @@
           "settle_time": "Wait after a change before the next one.",
           "on_margin": "Extra power a load needs, above its own, to be switched on.",
           "import_tolerance": "Grid import tolerated before a load is switched off.",
-          "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right."
+          "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right.",
+          "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check."
         }
       }
     }
@@ -231,7 +235,11 @@
           "unavailable": "Unavailable",
           "global_condition": "Global condition off",
           "variable": "Regulated externally",
-          "global_shutdown": "Global condition off: switching off"
+          "global_shutdown": "Global condition off: switching off",
+          "grid_unknown": "Grid reading missing or frozen",
+          "mode_unknown": "Zero-injection entity unknown",
+          "global_unknown": "Global condition unknown",
+          "condition_unknown": "Usage condition unknown"
         }
       }
     },

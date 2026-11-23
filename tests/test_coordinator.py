@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 from freezegun.api import FrozenDateTimeFactory
-from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE
+from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import label_registry as lr
@@ -15,6 +15,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from custom_components.solarsplit.const import (
+    CONF_CONDITION_ENTITY,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
     CONF_HVAC_MODE,
@@ -30,6 +31,8 @@ from custom_components.solarsplit.const import (
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
+    CONF_STALE_TIMEOUT,
+    CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
     SUBENTRY_LOAD,
 )
@@ -219,13 +222,94 @@ async def test_editing_a_load_still_reloads(hass: HomeAssistant) -> None:
     assert entry.runtime_data is not coordinator
 
 
+def _assert_grid_unknown(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    assert hass.states.get(_entity(hass, f"{ENTRY_ID}_budget")).state == STATE_UNKNOWN
+    decision = hass.states.get(_entity(hass, f"{ENTRY_ID}_last_decision"))
+    assert decision.state == "none" and decision.attributes["reason"] == "grid_unknown"
+    assert _state(hass, entry, "load_reason", POOL) == "grid_unknown"
+
+
 @pytest.mark.parametrize("sensor", [EXPORT, IMPORT])
-async def test_unavailable_grid_makes_entities_unavailable(hass: HomeAssistant, sensor: str) -> None:
-    entry = await _setup(hass)
-    hass.states.async_set(sensor, STATE_UNAVAILABLE)
+@pytest.mark.parametrize("value", [STATE_UNAVAILABLE, STATE_UNKNOWN])
+async def test_unusable_grid_reading_decides_nothing(hass: HomeAssistant, sensor: str, value: str) -> None:
+    entry = await _setup(hass, shadow=False)
+    switch_on = async_mock_service(hass, "switch", "turn_on")
+    hass.states.async_set(EXPORT, "3000", {"unit_of_measurement": "W"})
+    hass.states.async_set(sensor, value)
     await entry.runtime_data.async_refresh()
     await hass.async_block_till_done()
-    assert hass.states.get(_entity(hass, f"{entry.entry_id}_budget")).state == STATE_UNAVAILABLE
+    _assert_grid_unknown(hass, entry)
+    assert switch_on == []
+
+
+async def test_frozen_grid_reading_decides_nothing(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    entry = await _setup(hass, shadow=False)
+    switch_on = async_mock_service(hass, "switch", "turn_on")
+    hass.states.async_set(EXPORT, "3000", {"unit_of_measurement": "W"})
+    freezer.tick(timedelta(seconds=21))
+    hass.states.async_set(IMPORT, "0", {"unit_of_measurement": "W"})  # still reporting
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    _assert_grid_unknown(hass, entry)
+    assert switch_on == []
+
+    await _cycle(hass, entry, export=3000)  # reported again
+    assert [c.data["entity_id"] for c in switch_on] == [POOL]
+
+
+async def test_quiet_side_at_zero_is_not_frozen(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    """A meter only writes the side that changes: import resting at 0 W may stay quiet."""
+    entry = await _setup(hass)
+    freezer.tick(timedelta(minutes=30))
+    hass.states.async_set(EXPORT, "1500", {"unit_of_measurement": "W"})
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert _state(hass, entry, "load_reason", POOL) == "fits"
+
+    freezer.tick(timedelta(seconds=21))  # now both sides are quiet
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    _assert_grid_unknown(hass, entry)
+
+
+async def test_stale_check_can_be_disabled(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    entry = await _setup(hass, **{CONF_STALE_TIMEOUT: 0})
+    hass.states.async_set(EXPORT, "1500", {"unit_of_measurement": "W"})
+    freezer.tick(timedelta(hours=1))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert _state(hass, entry, "load_reason", POOL) == "fits"
+
+
+async def test_unknown_zero_injection_entity_pauses(hass: HomeAssistant) -> None:
+    hass.states.async_set("input_boolean.zero_injection", STATE_UNAVAILABLE)
+    entry = await _setup(hass, **{CONF_ZERO_INJECTION_ENTITY: "input_boolean.zero_injection"})
+    await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "mode") == "paused"
+    assert _state(hass, entry, "load_reason", POOL) == "mode_unknown"
+
+
+async def test_unknown_global_condition_does_not_switch_off(hass: HomeAssistant) -> None:
+    hass.states.async_set(HOUSE, STATE_UNAVAILABLE)
+    entry = await _setup(hass, shadow=False, pool="on", **{CONF_GLOBAL_CONDITION: HOUSE})
+    entry.runtime_data.memory[_sid(POOL)].commanded = True
+    switch_off = async_mock_service(hass, "switch", "turn_off")
+    await _cycle(hass, entry, export=1000)
+    assert _state(hass, entry, "load_reason", POOL) == "global_unknown"
+    assert switch_off == []
+
+
+async def test_unknown_usage_condition_keeps_the_load(hass: HomeAssistant) -> None:
+    cond = "input_boolean.climatizar_casa"
+    hass.states.async_set(cond, STATE_UNKNOWN)
+    entry = await _setup(hass, shadow=False, pool="on",
+                         loads=[_load("Pool", POOL, 750, 1, **{CONF_CONDITION_ENTITY: cond})])
+    entry.runtime_data.memory[_sid(POOL)].commanded = True
+    switch_off = async_mock_service(hass, "switch", "turn_off")
+    await _cycle(hass, entry, imp=2000)
+    assert _state(hass, entry, "load_reason", POOL) == "condition_unknown"
+    assert _state(hass, entry, "load_state", POOL) == "on"
+    assert switch_off == []
 
 
 def _saved(hass_storage: dict, now: float, **pool: Any) -> None:

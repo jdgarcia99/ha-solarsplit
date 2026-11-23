@@ -2,6 +2,8 @@
 
 ## 0.2.0 (unreleased)
 
+- Unknown data is never 0 W. A missing or frozen grid reading makes the cycle decide nothing and publish the reason `grid_unknown` (the budget becomes unknown; entities stay available). New setting *Stale data timeout* (20 s): a non-zero grid reading not reported for longer, or both grid sensors quiet at once, counts as unknown.
+- An unknown zero-injection entity pauses the loop (`mode_unknown`); an unknown global or usage condition leaves its loads as they are (`global_unknown`, `condition_unknown`) instead of switching them off. A variable load whose power or regulation entity cannot be read is unavailable.
 - New brand: icon and README banner, with SVG sources in `images/`. The orange logos and `scripts/render_brand.py` are gone.
 
 ## 0.1.0 (unreleased)

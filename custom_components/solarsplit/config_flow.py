@@ -43,6 +43,7 @@ from .const import (
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
+    CONF_STALE_TIMEOUT,
     CONF_VARIABLE_ENTITY,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
@@ -98,6 +99,9 @@ def settings_schema(values: dict[str, Any]) -> vol.Schema:
             vol.Required(CONF_ON_MARGIN, default=values[CONF_ON_MARGIN]): _number(0, 2000, UnitOfPower.WATT),
             vol.Required(CONF_IMPORT_TOLERANCE, default=values[CONF_IMPORT_TOLERANCE]): _number(
                 0, 2000, UnitOfPower.WATT
+            ),
+            vol.Required(CONF_STALE_TIMEOUT, default=values[CONF_STALE_TIMEOUT]): _number(
+                0, 600, UnitOfTime.SECONDS
             ),
             vol.Required(CONF_SHADOW_MODE, default=values[CONF_SHADOW_MODE]): selector.BooleanSelector(),
         }

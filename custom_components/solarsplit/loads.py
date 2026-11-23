@@ -29,9 +29,18 @@ def load_is_on(state: State | None) -> bool | None:
     return state.state == STATE_ON
 
 
-def entity_is_on(state: State | None) -> bool:
-    """Whether a boolean-like entity (condition, mode) is on. Unusable counts as off."""
-    return state is not None and state.state == STATE_ON
+def entity_is_on(state: State | None) -> bool | None:
+    """Whether a boolean-like entity (condition, mode) is on; None if its state is not usable."""
+    if state is None or state.state in UNUSABLE:
+        return None
+    return state.state == STATE_ON
+
+
+def entity_has_state(state: State | None, expected: str) -> bool | None:
+    """Whether an entity has the expected state; None if its state is not usable."""
+    if state is None or state.state in UNUSABLE:
+        return None
+    return state.state == expected
 
 
 def read_watts(state: State | None) -> float | None:

@@ -17,7 +17,7 @@ from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.storage import Store
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
 from .const import (
@@ -45,6 +45,7 @@ from .const import (
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
+    CONF_STALE_TIMEOUT,
     CONF_VARIABLE_ENTITY,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
@@ -59,7 +60,13 @@ from .engine import (
     Reason,
     decide,
 )
-from .loads import async_switch_load, entity_is_on, load_is_on, read_watts
+from .loads import (
+    async_switch_load,
+    entity_has_state,
+    entity_is_on,
+    load_is_on,
+    read_watts,
+)
 from .settings import config_snapshot, get_settings, load_settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,7 +89,10 @@ LOAD_UNMANAGED = "unmanaged"
 LOAD_UNAVAILABLE = "unavailable"
 LOAD_STATES = [LOAD_ON, LOAD_OFF, LOAD_WAITING, LOAD_BLOCKED, LOAD_MANUAL, LOAD_UNMANAGED, LOAD_UNAVAILABLE]
 
-_BLOCKING = (Reason.NOT_ELIGIBLE, Reason.WAITING_HIGHER, Reason.NO_BUDGET, Reason.GLOBAL_CONDITION)
+_BLOCKING = (
+    Reason.NOT_ELIGIBLE, Reason.WAITING_HIGHER, Reason.NO_BUDGET, Reason.GLOBAL_CONDITION,
+    Reason.GLOBAL_UNKNOWN, Reason.CONDITION_UNKNOWN,
+)
 _STATE_FOR = {
     Reason.MANUAL: LOAD_MANUAL,
     Reason.UNMANAGED: LOAD_UNMANAGED,
@@ -178,8 +188,8 @@ class CycleResult:
     time: float
     mode: str
     shadow: bool
-    export_w: float
-    import_w: float
+    export_w: float | None  # smoothed; None when a grid reading is missing or frozen
+    import_w: float | None
     assigned_w: float
     decision: Decision
     loads: dict[str, LoadView] = field(default_factory=dict)
@@ -292,7 +302,29 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         n = len(self._samples)
         return sum(s[1] for s in self._samples) / n, sum(s[2] for s in self._samples) / n
 
-    def _load_state(self, load: LoadConfig, global_on: bool) -> LoadState:
+    def _grid(self, now: float) -> tuple[float, float] | None:
+        """Raw export and import in W, or None if a reading is missing or frozen.
+
+        A meter split into two sensors only writes the side that changes, so a side
+        resting at 0 W can stay quiet for hours while the other one moves. Frozen
+        data is a non-zero reading that has not been reported within the timeout,
+        or both sides quiet at once.
+        """
+        timeout = self.settings[CONF_STALE_TIMEOUT]
+        readings: list[tuple[float, bool]] = []
+        for key in (CONF_EXPORT_SENSOR, CONF_IMPORT_SENSOR):
+            state = self._state(self.settings[key])
+            if (value := read_watts(state)) is None:
+                return None
+            fresh = not timeout or now - state.last_reported.timestamp() <= timeout
+            readings.append((max(value, 0.0), fresh))
+        if not any(fresh for _, fresh in readings):
+            return None
+        if any(value and not fresh for value, fresh in readings):
+            return None
+        return readings[0][0], readings[1][0]
+
+    def _load_state(self, load: LoadConfig, global_on: bool | None) -> LoadState:
         """Engine input for one load."""
         memory = self.memory[load.id]
         state = self._state(load.entity_id)
@@ -304,22 +336,28 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         )
         # In shadow mode nothing was switched by us: simulate owning every load that is on.
         owned = bool(is_on) if self.shadow else memory.commanded is True
-        eligible = load.condition_entity is None or (
-            (cond := self._state(load.condition_entity)) is not None and cond.state == load.condition_state
+        eligible = load.condition_entity is None or entity_has_state(
+            self._state(load.condition_entity), load.condition_state
         )
         variable = load.variable_entity is not None and entity_is_on(self._state(load.variable_entity))
+        actual_w = read_watts(self._state(load.power_sensor))
+        # Unknown data is unknown, never 0 W: a variable load whose power or regulation
+        # entity cannot be read is left as it is.
+        available = is_on is not None and variable is not None and not (
+            variable and load.power_sensor is not None and actual_w is None
+        )
         return LoadState(
             id=load.id,
             priority=load.priority,
             nominal_w=load.nominal_w,
             is_on=bool(is_on),
-            actual_w=read_watts(self._state(load.power_sensor)),
+            actual_w=actual_w,
             kind=LoadKind.VARIABLE if variable else LoadKind.RELAY,
             managed=memory.managed,
-            available=is_on is not None,
+            available=available,
             manual=manual,
             owned=owned,
-            global_ok=global_on or not load.respect_global,
+            global_ok=True if not load.respect_global else global_on,
             eligible=eligible,
             no_skip=load.no_skip,
             min_on=load.min_on,
@@ -334,25 +372,28 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
     async def _async_update_data(self) -> CycleResult:
         """Run one control cycle."""
         now = dt_util.utcnow().timestamp()
-        export_w = read_watts(self._state(self.settings[CONF_EXPORT_SENSOR]))
-        import_w = read_watts(self._state(self.settings[CONF_IMPORT_SENSOR]))
-        if export_w is None or import_w is None:
-            raise UpdateFailed("Grid export or import sensor is unavailable")
-        export_w, import_w = self._smoothed(now, max(export_w, 0.0), max(import_w, 0.0))
+        meas = None
+        if (grid := self._grid(now)) is not None:
+            meas = Measurements(*self._smoothed(now, *grid))
 
         global_entity = self.settings[CONF_GLOBAL_CONDITION]
-        global_on = global_entity is None or entity_is_on(self._state(global_entity))
+        global_on = True if global_entity is None else entity_is_on(self._state(global_entity))
+        zero_entity = self.settings[CONF_ZERO_INJECTION_ENTITY]
+        zero_injection = False if zero_entity is None else entity_is_on(self._state(zero_entity))
+        pause_reason = Reason.PAUSED
         if not self.active:
             mode = MODE_PAUSED
-        elif entity_is_on(self._state(self.settings[CONF_ZERO_INJECTION_ENTITY])):
+        elif zero_injection is None:
+            mode, pause_reason = MODE_PAUSED, Reason.MODE_UNKNOWN
+        elif zero_injection:
             mode = MODE_ZERO_INJECTION  # probing is not implemented yet: the engine stays paused
         else:
             mode = MODE_NORMAL
 
         states = [self._load_state(load, global_on) for load in self.loads]
         decision = decide(
-            now, Measurements(export_w, import_w), states, self.engine_config,
-            self.last_action, active=mode == MODE_NORMAL,
+            now, meas, states, self.engine_config,
+            self.last_action, active=mode == MODE_NORMAL, pause_reason=pause_reason,
         )
         for load in self.loads:
             memory = self.memory[load.id]
@@ -364,7 +405,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.save_memory()
 
         return CycleResult(
-            time=now, mode=mode, shadow=self.shadow, export_w=export_w, import_w=import_w,
+            time=now, mode=mode, shadow=self.shadow,
+            export_w=meas.export_w if meas else None, import_w=meas.import_w if meas else None,
             assigned_w=sum(s.consumption for s in states if s.controlled),
             decision=decision,
             loads={s.id: self._view(s, decision) for s in states},

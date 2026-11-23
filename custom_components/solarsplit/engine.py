@@ -32,6 +32,8 @@ class Reason(StrEnum):
     """
 
     PAUSED = "paused"
+    GRID_UNKNOWN = "grid_unknown"  # a grid reading is missing or frozen: nothing is decided
+    MODE_UNKNOWN = "mode_unknown"  # the zero-injection entity is not usable: nothing is decided
     SETTLING = "settling"
     STEADY = "steady"
     FITS = "fits"
@@ -48,6 +50,8 @@ class Reason(StrEnum):
     GLOBAL_CONDITION = "global_condition"
     GLOBAL_SHUTDOWN = "global_shutdown"
     VARIABLE = "variable"
+    GLOBAL_UNKNOWN = "global_unknown"
+    CONDITION_UNKNOWN = "condition_unknown"
 
 
 @dataclass(frozen=True)
@@ -82,8 +86,10 @@ class LoadState:
     available: bool = True  # its entity reports a usable state
     manual: bool = False
     owned: bool = False  # SolarSplit switched it on (in shadow mode: assumed for loads that are on)
-    global_ok: bool = True  # the global condition holds, or this load ignores it
-    eligible: bool = True  # its usage condition holds
+    # The global condition holds, or this load ignores it. None: its entity is not
+    # usable, and the load is left as it is.
+    global_ok: bool | None = True
+    eligible: bool | None = True  # its usage condition holds; None: unknown, left as it is
     no_skip: bool = False  # only enters when every eligible load before it is on
     min_on: float = 0  # s
     min_off: float = 0  # s
@@ -112,19 +118,22 @@ class LoadState:
         Loads it does not own are left as they are, and their power is not reassigned.
         A load it switched on stays its own when the global condition fails, to switch it off.
         """
-        return self.managed and self.available and not self.manual and (self.global_ok or self.shutdown)
+        return (
+            self.managed and self.available and not self.manual
+            and ((self.global_ok is True and self.eligible is not None) or self.shutdown)
+        )
 
     @property
     def shutdown(self) -> bool:
         """Whether the global condition failing means switching this load off."""
-        return not self.global_ok and self.owned and self.is_on and self.kind is LoadKind.RELAY
+        return self.global_ok is False and self.owned and self.is_on and self.kind is LoadKind.RELAY
 
 
 @dataclass(frozen=True)
 class Decision:
     """Outcome of one cycle: at most one action, plus the reason for every load."""
 
-    budget: float
+    budget: float | None  # None when the grid readings are unknown
     action: Action = Action.NONE
     load_id: str | None = None
     reason: Reason = Reason.STEADY
@@ -139,24 +148,33 @@ def _since(previous: float | None, now: float) -> float:
     return now if previous is None else previous
 
 
-def compute_budget(meas: Measurements, loads: list[LoadState], cfg: EngineConfig) -> float:
+def compute_budget(meas: Measurements | None, loads: list[LoadState], cfg: EngineConfig) -> float | None:
     """Power available to hand out, counting what controlled loads already use."""
+    if meas is None:
+        return None
     assigned = sum(load.consumption for load in loads if load.controlled)
     return meas.export_w - meas.import_w + assigned - cfg.safety_margin
 
 
 def decide(
     now: float,
-    meas: Measurements,
+    meas: Measurements | None,
     loads: list[LoadState],
     cfg: EngineConfig,
     last_action: float | None = None,
     active: bool = True,
+    pause_reason: Reason = Reason.PAUSED,
 ) -> Decision:
-    """Run one control cycle."""
+    """Run one control cycle.
+
+    `meas` is None when a grid reading is missing or frozen: the cycle decides
+    nothing and every delay mark resets, since nobody saw the condition hold.
+    """
     budget = compute_budget(meas, loads, cfg)
     if not active:
-        return Decision(budget, reason=Reason.PAUSED)
+        return Decision(budget, reason=pause_reason)
+    if budget is None:
+        return Decision(budget, reason=Reason.GRID_UNKNOWN)
 
     desired: dict[str, bool] = {}
     reasons: dict[str, Reason] = {}
@@ -177,8 +195,14 @@ def decide(
             desired[load.id] = False
             reasons[load.id] = Reason.GLOBAL_SHUTDOWN
             continue
+        if load.global_ok is None:
+            reasons[load.id] = Reason.GLOBAL_UNKNOWN
+            continue
         if not load.global_ok:
             reasons[load.id] = Reason.GLOBAL_CONDITION
+            continue
+        if load.eligible is None:
+            reasons[load.id] = Reason.CONDITION_UNKNOWN
             continue
         if load.kind is LoadKind.VARIABLE:
             remaining -= load.consumption

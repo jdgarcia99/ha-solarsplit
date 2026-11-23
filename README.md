@@ -25,6 +25,15 @@ A load only switches on after the surplus has covered it for its switch-on delay
 
 When the global condition goes off, SolarSplit switches off the loads it switched on itself and that respect the condition (respecting their minimum on time); loads switched by hand and loads that ignore the condition are left alone. Turning the master switch off, instead, leaves every load as it is.
 
+### Unknown data
+
+Unavailable or unknown entities are unknown data, never 0 W:
+
+- If a grid reading is missing or frozen, the cycle decides nothing: the budget is `unknown`, the last decision is `none` with reason `grid_unknown`, and every delay mark starts again. A grid sensor is frozen when it reads a non-zero value that has not been reported for the *stale data timeout*, or when both grid sensors are quiet at once. A side resting at 0 W may stay quiet: meters only write the side that changes.
+- An unknown zero-injection entity pauses the loop (`mode_unknown`).
+- An unknown global condition or usage condition leaves the loads that depend on it as they are (`global_unknown`, `condition_unknown`): no switch-off, and their power is not reassigned.
+- A load regulated externally whose power sensor or regulation entity cannot be read is `unavailable` and left as it is.
+
 The loop's memory (what it switched, the time of each load's last change and the delay marks) is saved, so a reload or a restart of Home Assistant does not turn its loads into manual ones. A load changed while Home Assistant was stopped is detected as manual. Delay marks older than two minutes are dropped on restart.
 
 All SolarSplit entities get the label **Gestión de excedentes**, created if it does not exist.
@@ -143,6 +152,7 @@ All settings live in the UI; there is no YAML. They can be changed later from th
 | Settle time | 30 s | Wait after a change before the next one. |
 | Switch-on margin | 100 W | Extra power a load needs, above its own, to be switched on. |
 | Import tolerance | 150 W | Grid import tolerated before a load is switched off. |
+| Stale data timeout | 20 s | A non-zero grid reading not reported for longer, or both grid sensors quiet at once, counts as unknown. 0 disables the check. |
 | Shadow mode | on | Decide and publish decisions without switching any load. |
 
 ## Loads

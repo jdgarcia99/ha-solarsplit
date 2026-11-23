@@ -17,8 +17,10 @@ from custom_components.solarsplit.const import (
     CONF_PRIORITY,
     CONF_RESPECT_MANUAL,
     CONF_SAFETY_MARGIN,
+    CONF_STALE_TIMEOUT,
     DEFAULT_PRIORITY,
     DEFAULT_SAFETY_MARGIN,
+    DEFAULT_STALE_TIMEOUT,
     DOMAIN,
     SUBENTRY_LOAD,
 )
@@ -33,6 +35,7 @@ async def test_user_flow_creates_single_entry(hass: HomeAssistant) -> None:
     assert result["type"] is FlowResultType.CREATE_ENTRY
     entry = result["result"]
     assert get_settings(entry)[CONF_SAFETY_MARGIN] == DEFAULT_SAFETY_MARGIN
+    assert get_settings(entry)[CONF_STALE_TIMEOUT] == DEFAULT_STALE_TIMEOUT
 
     result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
     assert result["type"] is FlowResultType.ABORT

@@ -49,8 +49,8 @@ class PowerSensor(SolarSplitEntity, SensorEntity):
     _attr_suggested_display_precision = 0
 
     @property
-    def native_value(self) -> float:
-        """Value of the last cycle."""
+    def native_value(self) -> float | None:
+        """Value of the last cycle; the budget is unknown without grid readings."""
         data: CycleResult = self.coordinator.data
         return data.decision.budget if self._attr_translation_key == "budget" else data.assigned_w
 
@@ -86,7 +86,7 @@ class DecisionSensor(SolarSplitEntity, SensorEntity):
         return {
             "load": names.get(data.decision.load_id),
             "reason": data.decision.reason.value,
-            "budget": round(data.decision.budget),
+            "budget": None if data.decision.budget is None else round(data.decision.budget),
             "shadow": data.shadow,
         }
 

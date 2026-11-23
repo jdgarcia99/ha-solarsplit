@@ -19,7 +19,8 @@
           "settle_time": "Tiempo de asentamiento",
           "on_margin": "Margen de encendido",
           "import_tolerance": "Tolerancia de importación",
-          "shadow_mode": "Modo sombra"
+          "shadow_mode": "Modo sombra",
+          "stale_timeout": "Tiempo de datos congelados"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Señal principal del bucle.",
@@ -33,7 +34,8 @@
           "settle_time": "Espera tras un cambio antes del siguiente.",
           "on_margin": "Potencia extra, además de la suya, que necesita una carga para encenderse.",
           "import_tolerance": "Importación de red tolerada antes de apagar una carga.",
-          "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas."
+          "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas.",
+          "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación."
         }
       }
     }
@@ -54,7 +56,8 @@
           "settle_time": "Tiempo de asentamiento",
           "on_margin": "Margen de encendido",
           "import_tolerance": "Tolerancia de importación",
-          "shadow_mode": "Modo sombra"
+          "shadow_mode": "Modo sombra",
+          "stale_timeout": "Tiempo de datos congelados"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Señal principal del bucle.",
@@ -68,7 +71,8 @@
           "settle_time": "Espera tras un cambio antes del siguiente.",
           "on_margin": "Potencia extra, además de la suya, que necesita una carga para encenderse.",
           "import_tolerance": "Importación de red tolerada antes de apagar una carga.",
-          "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas."
+          "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas.",
+          "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación."
         }
       }
     }
@@ -231,7 +235,11 @@
           "unavailable": "No disponible",
           "global_condition": "Condición global apagada",
           "variable": "Regulada externamente",
-          "global_shutdown": "Condición global apagada: se apaga"
+          "global_shutdown": "Condición global apagada: se apaga",
+          "grid_unknown": "Lectura de red ausente o congelada",
+          "mode_unknown": "Entidad de inyección cero desconocida",
+          "global_unknown": "Condición global desconocida",
+          "condition_unknown": "Condición de uso desconocida"
         }
       }
     },

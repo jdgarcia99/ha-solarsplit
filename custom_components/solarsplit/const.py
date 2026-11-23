@@ -17,6 +17,7 @@ CONF_SETTLE_TIME = "settle_time"
 CONF_ON_MARGIN = "on_margin"
 CONF_IMPORT_TOLERANCE = "import_tolerance"
 CONF_SHADOW_MODE = "shadow_mode"
+CONF_STALE_TIMEOUT = "stale_timeout"
 
 DEFAULT_SHADOW_MODE = True  # decide and publish, but never switch a load
 DEFAULT_CYCLE_INTERVAL = 5  # s, control loop period
@@ -25,6 +26,7 @@ DEFAULT_SMOOTHING_WINDOW = 30  # s, moving average of the measurements
 DEFAULT_SETTLE_TIME = 30  # s, wait after a change before the next one
 DEFAULT_ON_MARGIN = 100  # W, extra budget a load needs to be switched on
 DEFAULT_IMPORT_TOLERANCE = 150  # W, deficit tolerated before a load is switched off
+DEFAULT_STALE_TIMEOUT = 20  # s, a grid reading not reported for longer is unknown; 0 = never
 
 MIN_CYCLE_INTERVAL = 2
 MAX_CYCLE_INTERVAL = 60

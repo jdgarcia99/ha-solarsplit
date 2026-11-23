@@ -198,3 +198,30 @@ def test_off_delay_restarts_when_condition_breaks() -> None:
 def test_marks_progress_while_settling() -> None:
     d = decide(NOW, Measurements(1000, 0), [pool(on_delay=60)], CFG, last_action=NOW - 5)
     assert d.reason is Reason.SETTLING and d.on_since == {"pool": NOW}
+
+
+def test_unknown_grid_decides_nothing_and_resets_marks() -> None:
+    load = pool(on_delay=60, on_since=NOW - 30)
+    d = decide(NOW, None, [load, ac(is_on=True)], CFG)
+    assert (d.action, d.reason, d.budget) == (Action.NONE, Reason.GRID_UNKNOWN, None)
+    assert d.desired == {} and d.on_since == {} and d.off_since == {}
+
+
+def test_pause_reason_is_reported() -> None:
+    d = decide(NOW, Measurements(5000, 0), [pool()], CFG, active=False, pause_reason=Reason.MODE_UNKNOWN)
+    assert (d.action, d.reason) == (Action.NONE, Reason.MODE_UNKNOWN)
+
+
+def test_unknown_global_condition_leaves_loads_as_they_are() -> None:
+    # Not a shutdown: an entity that stops reporting is not the condition failing
+    loads = [pool(is_on=True, owned=True, global_ok=None), ac(global_ok=None)]
+    d = decide(NOW, Measurements(0, 2000), loads, CFG)
+    assert d.reasons == {"pool": Reason.GLOBAL_UNKNOWN, "ac": Reason.GLOBAL_UNKNOWN}
+    assert d.action is Action.NONE and d.budget == -2100  # the pool's power is not reassigned
+
+
+def test_unknown_usage_condition_leaves_the_load_as_it_is() -> None:
+    loads = [ac(is_on=True, eligible=None), pool()]
+    d = decide(NOW, Measurements(0, 0), loads, CFG)
+    assert d.reasons["ac"] is Reason.CONDITION_UNKNOWN and "ac" not in d.desired
+    assert d.action is Action.NONE  # the 900 W it draws are not handed to the pool
