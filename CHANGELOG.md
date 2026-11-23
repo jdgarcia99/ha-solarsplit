@@ -2,6 +2,8 @@
 
 ## 0.2.0 (unreleased)
 
+- Fix: the load form's sections came with an empty default, so the frontend sent them empty: their fields showed blank and editing a load cleared its optional entities (a regulable load could not be saved again). Sections are now required and without a default, like in Home Assistant core; the frontend fills them from their fields.
+
 - Optional signed grid power sensor, instead of the export and import sensors, with a sign setting (export negative, the default, or positive). With one sensor, a reading not reported within the stale data timeout is unknown, whatever it reads; separate sensors keep their rule. The forms require one mode or the other.
 - After a restart, before the first cycle, a regulable load outside its automatic mode whose limit SolarSplit had lowered (according to the saved memory) gets its maximum back, so a restart does not leave a manual heater boost held back. With unknown grid readings the maximum is also given back to regulable loads outside automatic mode or not managed. A limit already at its maximum is not written again.
 - Shadow mode never writes a regulable load's limit, not to lower it nor to give it back: the check sits in the one function that writes it. A test covers every path (cycle, switches, unload, start).

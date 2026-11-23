@@ -1,10 +1,12 @@
 """Config and options flows."""
 
 import pytest
+import voluptuous_serialize
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import config_validation as cv
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.solarsplit import get_settings, load_settings
@@ -96,12 +98,55 @@ async def _setup_entry(hass: HomeAssistant) -> MockConfigEntry:
     return entry
 
 
+def _initial(fields: list[dict]) -> dict:
+    """The data the frontend starts a form with (computeInitialHaFormData)."""
+    data: dict = {}
+    for field in fields:
+        suggested = (field.get("description") or {}).get("suggested_value")
+        if suggested is not None:
+            data[field["name"]] = suggested
+        elif "default" in field:
+            data[field["name"]] = field["default"]
+        elif field.get("type") == "expandable":
+            inner = _initial(field["schema"])
+            if field.get("required") or inner:
+                data[field["name"]] = inner
+    return data
+
+
+def _submit(form: dict, changes: dict) -> dict:
+    """What the frontend sends: the form's initial data with the user's changes.
+
+    A section in `changes` updates that section; None clears a field.
+    """
+    data = _initial(voluptuous_serialize.convert(form["data_schema"], custom_serializer=cv.custom_serializer))
+    for key, value in changes.items():
+        if isinstance(value, dict):
+            data[key] = {**data.get(key, {}), **value}
+        else:
+            data[key] = value
+    return _clean(data)
+
+
+def _clean(data: dict) -> dict:
+    return {k: _clean(v) if isinstance(v, dict) else v for k, v in data.items() if v is not None}
+
+
 async def _add_load(hass: HomeAssistant, entry: MockConfigEntry, data: dict) -> dict:
     result = await hass.config_entries.subentries.async_init(
         (entry.entry_id, SUBENTRY_LOAD), context={"source": config_entries.SOURCE_USER}
     )
     assert result["type"] is FlowResultType.FORM
-    return await hass.config_entries.subentries.async_configure(result["flow_id"], data)
+    return await hass.config_entries.subentries.async_configure(result["flow_id"], _submit(result, data))
+
+
+async def _reconfigure(hass: HomeAssistant, entry: MockConfigEntry, subentry_id: str, changes: dict) -> dict:
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_LOAD),
+        context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": subentry_id},
+    )
+    assert result["type"] is FlowResultType.FORM
+    return await hass.config_entries.subentries.async_configure(result["flow_id"], _submit(result, changes))
 
 
 async def test_add_load_with_defaults(hass: HomeAssistant) -> None:
@@ -128,13 +173,8 @@ async def test_reconfigure_load(hass: HomeAssistant) -> None:
     entry = await _setup_entry(hass)
     await _add_load(hass, entry, {**LOAD, CONF_POWER_SENSOR: "sensor.pool_power"})
     (subentry,) = entry.subentries.values()
-    result = await hass.config_entries.subentries.async_init(
-        (entry.entry_id, SUBENTRY_LOAD),
-        context={"source": config_entries.SOURCE_RECONFIGURE, "subentry_id": subentry.subentry_id},
-    )
-    assert result["type"] is FlowResultType.FORM
-    result = await hass.config_entries.subentries.async_configure(
-        result["flow_id"], {**LOAD, CONF_NAME: "Depuradora", CONF_PRIORITY: 1}
+    result = await _reconfigure(
+        hass, entry, subentry.subentry_id, {CONF_NAME: "Depuradora", CONF_PRIORITY: 1, CONF_POWER_SENSOR: None}
     )
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
@@ -246,3 +286,37 @@ async def test_options_flow_switches_to_signed_grid_sensor(hass: HomeAssistant) 
     result = await hass.config_entries.options.async_init(entry.entry_id)
     result = await hass.config_entries.options.async_configure(result["flow_id"], {})
     assert result["errors"] == {"base": "grid_sensors"}
+
+
+# ---------------------------------------------------------------------------
+# Sections filled by the frontend
+# ---------------------------------------------------------------------------
+
+
+async def test_sections_have_no_default(hass: HomeAssistant) -> None:
+    """With a default the frontend sends that default and ignores the section's fields."""
+    entry = await _setup_entry(hass)
+    result = await hass.config_entries.subentries.async_init(
+        (entry.entry_id, SUBENTRY_LOAD), context={"source": config_entries.SOURCE_USER}
+    )
+    fields = voluptuous_serialize.convert(result["data_schema"], custom_serializer=cv.custom_serializer)
+    sections = [field for field in fields if field.get("type") == "expandable"]
+    assert {field["name"] for field in sections} == {SECTION_REGULABLE, SECTION_DAILY_TARGET}
+    assert all(field["required"] and "default" not in field for field in sections)
+    regulable = _initial(fields)[SECTION_REGULABLE]
+    assert regulable[CONF_AUTO_STATE] == DEFAULT_AUTO_STATE
+    assert regulable[CONF_LIMIT_THRESHOLD] == DEFAULT_LIMIT_THRESHOLD
+
+
+async def test_editing_a_regulable_load_keeps_its_section(hass: HomeAssistant) -> None:
+    """The bug: the section came back empty and its entities were cleared on save."""
+    entry = await _setup_entry(hass)
+    await _add_load(hass, entry, {**TERMO, SECTION_REGULABLE: REGULABLE})
+    (subentry,) = entry.subentries.values()
+    result = await _reconfigure(hass, entry, subentry.subentry_id, {CONF_PRIORITY: 2})
+    assert result["reason"] == "reconfigure_successful"
+    settings = load_settings(entry.subentries[subentry.subentry_id])
+    assert settings[CONF_PRIORITY] == 2
+    assert settings[CONF_LIMIT_ENTITY] == REGULABLE[CONF_LIMIT_ENTITY]
+    assert settings[CONF_MODE_ENTITY] == REGULABLE[CONF_MODE_ENTITY]
+    assert settings[CONF_LIMIT_MAX] == 1600

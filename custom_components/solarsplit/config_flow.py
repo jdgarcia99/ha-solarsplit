@@ -156,7 +156,13 @@ def validate_grid(user_input: dict[str, Any]) -> dict[str, str]:
 
 
 def load_schema(values: dict[str, Any]) -> vol.Schema:
-    """Schema of a load subentry, shared by its creation and reconfiguration."""
+    """Schema of a load subentry, shared by its creation and reconfiguration.
+
+    Sections are required and without a default: the frontend then fills each one
+    with the defaults and suggested values of its fields. With `default={}` it sent
+    an empty section, so its fields showed empty and editing a load cleared its
+    optional entities.
+    """
 
     def required(key: str) -> vol.Required:
         return vol.Required(key, default=values.get(key, vol.UNDEFINED))
@@ -202,10 +208,10 @@ def load_schema(values: dict[str, Any]) -> vol.Schema:
                 selector.SelectSelectorConfig(options=HVAC_MODES, translation_key=CONF_HVAC_MODE)
             ),
             _optional(CONF_VARIABLE_ENTITY, values): BOOLEAN_ENTITY,
-            vol.Optional(SECTION_REGULABLE, default={}): section(
+            vol.Required(SECTION_REGULABLE): section(
                 regulable, {"collapsed": values[CONF_LOAD_TYPE] != LOAD_TYPE_REGULABLE}
             ),
-            vol.Optional(SECTION_DAILY_TARGET, default={}): section(
+            vol.Required(SECTION_DAILY_TARGET): section(
                 daily_target, {"collapsed": not (values[CONF_TARGET_ENTITY] or values[CONF_TARGET_HOURS])}
             ),
         }
