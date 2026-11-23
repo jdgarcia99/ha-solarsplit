@@ -5,6 +5,8 @@ from __future__ import annotations
 DOMAIN = "solarsplit"
 LABEL_NAME = "Gestión de excedentes"  # given to every entity, created if missing
 
+CONF_GRID_SENSOR = "grid_sensor"  # one signed sensor, instead of export and import
+CONF_GRID_SIGN = "grid_sign"
 CONF_EXPORT_SENSOR = "export_sensor"
 CONF_IMPORT_SENSOR = "import_sensor"
 CONF_PV_SENSOR = "pv_sensor"
@@ -19,6 +21,11 @@ CONF_IMPORT_TOLERANCE = "import_tolerance"
 CONF_SHADOW_MODE = "shadow_mode"
 CONF_STALE_TIMEOUT = "stale_timeout"
 
+GRID_SIGN_EXPORT_NEGATIVE = "export_negative"  # negative = export, positive = import
+GRID_SIGN_EXPORT_POSITIVE = "export_positive"
+GRID_SIGNS = [GRID_SIGN_EXPORT_NEGATIVE, GRID_SIGN_EXPORT_POSITIVE]
+
+DEFAULT_GRID_SIGN = GRID_SIGN_EXPORT_NEGATIVE
 DEFAULT_SHADOW_MODE = True  # decide and publish, but never switch a load
 DEFAULT_CYCLE_INTERVAL = 5  # s, control loop period
 DEFAULT_SAFETY_MARGIN = 100  # W, never hand out the last watts

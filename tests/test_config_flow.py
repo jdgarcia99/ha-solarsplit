@@ -1,5 +1,6 @@
 """Config and options flows."""
 
+import pytest
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
@@ -11,6 +12,8 @@ from custom_components.solarsplit.const import (
     CONF_AUTO_STATE,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_GRID_SENSOR,
+    CONF_GRID_SIGN,
     CONF_HOURS_SENSOR,
     CONF_IMPORT_SENSOR,
     CONF_LIMIT_ENTITY,
@@ -29,11 +32,13 @@ from custom_components.solarsplit.const import (
     CONF_TARGET_ENTITY,
     CONF_TARGET_HOURS,
     DEFAULT_AUTO_STATE,
+    DEFAULT_GRID_SIGN,
     DEFAULT_LIMIT_THRESHOLD,
     DEFAULT_PRIORITY,
     DEFAULT_SAFETY_MARGIN,
     DEFAULT_STALE_TIMEOUT,
     DOMAIN,
+    GRID_SIGN_EXPORT_POSITIVE,
     LOAD_TYPE_REGULABLE,
     LOAD_TYPE_RELAY,
     SECTION_DAILY_TARGET,
@@ -197,3 +202,47 @@ async def test_add_load_with_daily_target(hass: HomeAssistant) -> None:
     assert settings[CONF_HOURS_SENSOR] == "sensor.piscina_on_hoy"
     assert settings[CONF_TARGET_ENTITY] == "input_number.horas_piscina"
     assert settings[CONF_TARGET_HOURS] == 0
+
+
+async def test_user_flow_with_signed_grid_sensor(hass: HomeAssistant) -> None:
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_GRID_SENSOR: "sensor.grid", CONF_GRID_SIGN: GRID_SIGN_EXPORT_POSITIVE}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    settings = get_settings(result["result"])
+    assert settings[CONF_GRID_SENSOR] == "sensor.grid"
+    assert settings[CONF_GRID_SIGN] == GRID_SIGN_EXPORT_POSITIVE
+    assert settings[CONF_EXPORT_SENSOR] is None
+
+
+@pytest.mark.parametrize(
+    "sensors",
+    [
+        {},  # none
+        {CONF_EXPORT_SENSOR: "sensor.export"},  # only one of the split sensors
+        {**SENSORS, CONF_GRID_SENSOR: "sensor.grid"},  # both modes at once
+    ],
+)
+async def test_user_flow_needs_one_grid_mode(hass: HomeAssistant, sensors: dict) -> None:
+    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], sensors)
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "grid_sensors"}
+
+
+async def test_options_flow_switches_to_signed_grid_sensor(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN, data=SENSORS)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_GRID_SENSOR: "sensor.grid"})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    settings = get_settings(entry)
+    assert settings[CONF_GRID_SENSOR] == "sensor.grid"
+    assert settings[CONF_GRID_SIGN] == DEFAULT_GRID_SIGN
+    assert settings[CONF_EXPORT_SENSOR] is None and settings[CONF_IMPORT_SENSOR] is None  # cleared
+
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(result["flow_id"], {})
+    assert result["errors"] == {"base": "grid_sensors"}

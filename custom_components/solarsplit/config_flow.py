@@ -25,6 +25,8 @@ from .const import (
     CONF_CYCLE_INTERVAL,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_GRID_SENSOR,
+    CONF_GRID_SIGN,
     CONF_HOURS_SENSOR,
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
@@ -59,6 +61,7 @@ from .const import (
     CONF_VARIABLE_ENTITY,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
+    GRID_SIGNS,
     HVAC_MODES,
     LOAD_DOMAINS,
     LOAD_TYPE_REGULABLE,
@@ -90,7 +93,10 @@ HOURS = selector.NumberSelector(
     )
 )
 SECTIONS = (SECTION_REGULABLE, SECTION_DAILY_TARGET)
-OPTIONAL_ENTITIES = (CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION)
+OPTIONAL_ENTITIES = (
+    CONF_GRID_SENSOR, CONF_EXPORT_SENSOR, CONF_IMPORT_SENSOR,
+    CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION,
+)
 
 
 def _number(minimum: int, maximum: int, unit: str | None = None) -> selector.NumberSelector:
@@ -111,8 +117,12 @@ def settings_schema(values: dict[str, Any]) -> vol.Schema:
     """Schema of the global settings, shared by the config and options flows."""
     return vol.Schema(
         {
-            vol.Required(CONF_EXPORT_SENSOR, default=values.get(CONF_EXPORT_SENSOR, vol.UNDEFINED)): POWER_SENSOR,
-            vol.Required(CONF_IMPORT_SENSOR, default=values.get(CONF_IMPORT_SENSOR, vol.UNDEFINED)): POWER_SENSOR,
+            _optional(CONF_GRID_SENSOR, values): POWER_SENSOR,
+            vol.Required(CONF_GRID_SIGN, default=values[CONF_GRID_SIGN]): selector.SelectSelector(
+                selector.SelectSelectorConfig(options=GRID_SIGNS, translation_key=CONF_GRID_SIGN)
+            ),
+            _optional(CONF_EXPORT_SENSOR, values): POWER_SENSOR,
+            _optional(CONF_IMPORT_SENSOR, values): POWER_SENSOR,
             _optional(CONF_PV_SENSOR, values): POWER_SENSOR,
             _optional(CONF_ZERO_INJECTION_ENTITY, values): BOOLEAN_ENTITY,
             _optional(CONF_GLOBAL_CONDITION, values): BOOLEAN_ENTITY,
@@ -134,6 +144,15 @@ def settings_schema(values: dict[str, Any]) -> vol.Schema:
             vol.Required(CONF_SHADOW_MODE, default=values[CONF_SHADOW_MODE]): selector.BooleanSelector(),
         }
     )
+
+
+def validate_grid(user_input: dict[str, Any]) -> dict[str, str]:
+    """Either one signed grid sensor, or both the export and the import sensors."""
+    signed = bool(user_input.get(CONF_GRID_SENSOR))
+    split = [bool(user_input.get(key)) for key in (CONF_EXPORT_SENSOR, CONF_IMPORT_SENSOR)]
+    if signed == any(split) or (not signed and not all(split)):
+        return {"base": "grid_sensors"}
+    return {}
 
 
 def load_schema(values: dict[str, Any]) -> vol.Schema:
@@ -210,9 +229,11 @@ class SolarSplitConfigFlow(ConfigFlow, domain=DOMAIN):
         """Ask for the grid sensors and the global settings."""
         await self.async_set_unique_id(DOMAIN)
         self._abort_if_unique_id_configured()
-        if user_input is not None:
+        errors = validate_grid(user_input) if user_input is not None else {}
+        if user_input is not None and not errors:
             return self.async_create_entry(title="SolarSplit", data=user_input)
-        return self.async_show_form(step_id="user", data_schema=settings_schema(DEFAULTS))
+        values = {**DEFAULTS, **(user_input or {})}
+        return self.async_show_form(step_id="user", data_schema=settings_schema(values), errors=errors)
 
     @staticmethod
     @callback
@@ -234,14 +255,14 @@ class SolarSplitOptionsFlow(OptionsFlow):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show the global settings."""
-        if user_input is not None:
+        errors = validate_grid(user_input) if user_input is not None else {}
+        if user_input is not None and not errors:
             # A cleared optional entity is missing from the input; store it as None
             # so it does not fall back to the value in the entry data.
             cleared = dict.fromkeys(OPTIONAL_ENTITIES)
             return self.async_create_entry(data={**cleared, **user_input})
-        return self.async_show_form(
-            step_id="init", data_schema=settings_schema(get_settings(self.config_entry))
-        )
+        values = {**get_settings(self.config_entry), **(user_input or {})}
+        return self.async_show_form(step_id="init", data_schema=settings_schema(values), errors=errors)
 
 
 class LoadSubentryFlow(ConfigSubentryFlow):

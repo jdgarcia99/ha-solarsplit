@@ -20,11 +20,13 @@
           "on_margin": "Margen de encendido",
           "import_tolerance": "Tolerancia de importación",
           "shadow_mode": "Modo sombra",
-          "stale_timeout": "Tiempo de datos congelados"
+          "stale_timeout": "Tiempo de datos congelados",
+          "grid_sensor": "Sensor de potencia de red con signo",
+          "grid_sign": "Signo del sensor de red"
         },
         "data_description": {
-          "export_sensor": "Potencia exportada a la red, en W. Señal principal del bucle.",
-          "import_sensor": "Potencia importada de la red, en W. Sirve para detectar déficit.",
+          "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
+          "import_sensor": "Potencia importada de la red, en W. Junto con el de exportación, en lugar de un sensor de red con signo.",
           "pv_sensor": "Producción FV, en W. Necesaria para el modo inyección cero.",
           "zero_injection_entity": "Cuando está encendida, el inversor limita la exportación y el bucle pasa a sondear cargas.",
           "global_condition": "Cuando está apagada, el bucle apaga las cargas que encendió y que la respetan, y deja el resto como estén.",
@@ -35,9 +37,14 @@
           "on_margin": "Potencia extra, además de la suya, que necesita una carga para encenderse.",
           "import_tolerance": "Importación de red tolerada antes de apagar una carga.",
           "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas.",
-          "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación."
+          "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación.",
+          "grid_sensor": "Un solo sensor con la potencia de red, exportación e importación con signos opuestos. Usa este o los dos sensores de exportación e importación. Con un solo sensor, una lectura que no se informa en el tiempo de datos congelados es desconocida.",
+          "grid_sign": "Solo para el sensor de red con signo: si la exportación es negativa o positiva."
         }
       }
+    },
+    "error": {
+      "grid_sensors": "Elige el sensor de red con signo, o bien los sensores de exportación e importación."
     }
   },
   "options": {
@@ -57,11 +64,13 @@
           "on_margin": "Margen de encendido",
           "import_tolerance": "Tolerancia de importación",
           "shadow_mode": "Modo sombra",
-          "stale_timeout": "Tiempo de datos congelados"
+          "stale_timeout": "Tiempo de datos congelados",
+          "grid_sensor": "Sensor de potencia de red con signo",
+          "grid_sign": "Signo del sensor de red"
         },
         "data_description": {
-          "export_sensor": "Potencia exportada a la red, en W. Señal principal del bucle.",
-          "import_sensor": "Potencia importada de la red, en W. Sirve para detectar déficit.",
+          "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
+          "import_sensor": "Potencia importada de la red, en W. Junto con el de exportación, en lugar de un sensor de red con signo.",
           "pv_sensor": "Producción FV, en W. Necesaria para el modo inyección cero.",
           "zero_injection_entity": "Cuando está encendida, el inversor limita la exportación y el bucle pasa a sondear cargas.",
           "global_condition": "Cuando está apagada, el bucle apaga las cargas que encendió y que la respetan, y deja el resto como estén.",
@@ -72,9 +81,14 @@
           "on_margin": "Potencia extra, además de la suya, que necesita una carga para encenderse.",
           "import_tolerance": "Importación de red tolerada antes de apagar una carga.",
           "shadow_mode": "Calcula y publica las decisiones sin conmutar ninguna carga. Desactívalo solo cuando las decisiones sean correctas.",
-          "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación."
+          "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación.",
+          "grid_sensor": "Un solo sensor con la potencia de red, exportación e importación con signos opuestos. Usa este o los dos sensores de exportación e importación. Con un solo sensor, una lectura que no se informa en el tiempo de datos congelados es desconocida.",
+          "grid_sign": "Solo para el sensor de red con signo: si la exportación es negativa o positiva."
         }
       }
+    },
+    "error": {
+      "grid_sensors": "Elige el sensor de red con signo, o bien los sensores de exportación e importación."
     }
   },
   "config_subentries": {
@@ -265,6 +279,12 @@
       "options": {
         "relay": "Relé",
         "regulable": "Regulable"
+      }
+    },
+    "grid_sign": {
+      "options": {
+        "export_negative": "Exportación negativa",
+        "export_positive": "Exportación positiva"
       }
     }
   },

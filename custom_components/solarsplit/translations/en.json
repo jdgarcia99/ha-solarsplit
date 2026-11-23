@@ -20,11 +20,13 @@
           "on_margin": "Switch-on margin",
           "import_tolerance": "Import tolerance",
           "shadow_mode": "Shadow mode",
-          "stale_timeout": "Stale data timeout"
+          "stale_timeout": "Stale data timeout",
+          "grid_sensor": "Signed grid power sensor",
+          "grid_sign": "Sign of the grid sensor"
         },
         "data_description": {
-          "export_sensor": "Power exported to the grid, in W. Main signal of the loop.",
-          "import_sensor": "Power imported from the grid, in W. Used to detect a deficit.",
+          "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
+          "import_sensor": "Power imported from the grid, in W. With the export sensor, instead of a signed grid sensor.",
           "pv_sensor": "PV production, in W. Needed for zero-injection mode.",
           "zero_injection_entity": "When this entity is on, the inverter limits export and the loop probes loads instead.",
           "global_condition": "When this entity is off, the loop switches off the loads it switched on that respect it, and leaves the rest as they are.",
@@ -35,9 +37,14 @@
           "on_margin": "Extra power a load needs, above its own, to be switched on.",
           "import_tolerance": "Grid import tolerated before a load is switched off.",
           "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right.",
-          "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check."
+          "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check.",
+          "grid_sensor": "One sensor with the grid power, export and import with opposite signs. Use either this one or both the export and import sensors. With one sensor, a reading not reported within the stale data timeout is unknown.",
+          "grid_sign": "Only for the signed grid sensor: whether export is negative or positive."
         }
       }
+    },
+    "error": {
+      "grid_sensors": "Choose either the signed grid sensor, or both the export and the import sensors."
     }
   },
   "options": {
@@ -57,11 +64,13 @@
           "on_margin": "Switch-on margin",
           "import_tolerance": "Import tolerance",
           "shadow_mode": "Shadow mode",
-          "stale_timeout": "Stale data timeout"
+          "stale_timeout": "Stale data timeout",
+          "grid_sensor": "Signed grid power sensor",
+          "grid_sign": "Sign of the grid sensor"
         },
         "data_description": {
-          "export_sensor": "Power exported to the grid, in W. Main signal of the loop.",
-          "import_sensor": "Power imported from the grid, in W. Used to detect a deficit.",
+          "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
+          "import_sensor": "Power imported from the grid, in W. With the export sensor, instead of a signed grid sensor.",
           "pv_sensor": "PV production, in W. Needed for zero-injection mode.",
           "zero_injection_entity": "When this entity is on, the inverter limits export and the loop probes loads instead.",
           "global_condition": "When this entity is off, the loop switches off the loads it switched on that respect it, and leaves the rest as they are.",
@@ -72,9 +81,14 @@
           "on_margin": "Extra power a load needs, above its own, to be switched on.",
           "import_tolerance": "Grid import tolerated before a load is switched off.",
           "shadow_mode": "Decide and publish decisions without switching any load. Turn off only when the decisions look right.",
-          "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check."
+          "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check.",
+          "grid_sensor": "One sensor with the grid power, export and import with opposite signs. Use either this one or both the export and import sensors. With one sensor, a reading not reported within the stale data timeout is unknown.",
+          "grid_sign": "Only for the signed grid sensor: whether export is negative or positive."
         }
       }
+    },
+    "error": {
+      "grid_sensors": "Choose either the signed grid sensor, or both the export and the import sensors."
     }
   },
   "config_subentries": {
@@ -265,6 +279,12 @@
       "options": {
         "relay": "Relay",
         "regulable": "Regulable"
+      }
+    },
+    "grid_sign": {
+      "options": {
+        "export_negative": "Export is negative",
+        "export_positive": "Export is positive"
       }
     }
   },

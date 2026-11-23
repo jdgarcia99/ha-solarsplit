@@ -51,6 +51,7 @@ Una entrada principal (config entry) con la configuración global, y una **suben
 | --- | --- | --- |
 | Sensor de exportación (W) | `sensor.meter_export_to_grid` | señal principal |
 | Sensor de importación (W) | del Pro 3EM | detectar déficit |
+| Sensor de red con signo (W) y signo | alternativa a los dos anteriores (0.2.0) | exportación negativa o positiva |
 | Sensor de potencia FV (W) | `sensor.solarnet_power_photovoltaics` | modo inyección cero |
 | Intervalo del ciclo (s) | 5 | ritmo del bucle |
 | Margen de seguridad (W) | 100 | nunca repartir el último vatio |
@@ -167,7 +168,9 @@ El atributo de diagnóstico de cada ciclo (presupuesto, cargas evaluadas, decisi
 - **Cargas no disponibles** (entidad `unavailable`/`unknown`) se tratan igual: se dejan como estén.
 - **Datos desconocidos (0.2.0).** Una entidad `unavailable`/`unknown` es un dato desconocido, nunca 0 W.
   - Si falta una lectura de red, el motor recibe `Measurements = None`: no decide, el presupuesto es desconocido, el motivo es `grid_unknown` y las marcas de retardo vuelven a empezar. Ya no se lanza `UpdateFailed`, así que las entidades siguen disponibles y muestran el motivo.
-  - **Datos congelados:** se mira `last_reported` de cada sensor de red frente al «tiempo de datos congelados» (20 s; 0 lo desactiva). Un sensor congelado es el que tiene un valor distinto de cero sin informar durante ese tiempo, o los dos sensores sin informar a la vez. Un lado en 0 W puede callar: el medidor de casa solo escribe el lado que cambia (`sensor.meter_import_from_grid` pasa horas en 0 sin informar mientras se exporta), y tratarlo como desconocido pararía el bucle todo el día.
+  - **Sensor de red con signo (0.2.0).** En lugar de los sensores de exportación e importación se puede usar uno solo con signo, con un selector que dice si la exportación es negativa (por defecto) o positiva. El coordinador lo convierte en exportación e importación (la parte positiva de cada lado) antes del suavizado: el motor no cambia. El formulario exige un modo u otro, no los dos (error `grid_sensors`); si la entrada tuviera ambos, manda el sensor con signo. Al cambiar de modo en Opciones, los sensores que se vacían se guardan como `None`.
+  - **Datos congelados con un solo sensor:** regla simple. Si no informa (`last_reported`) en el «tiempo de datos congelados», es desconocido, valga lo que valga: un sensor con signo no tiene un lado en reposo que pueda callar.
+  - **Datos congelados con dos sensores:** se mira `last_reported` de cada sensor de red frente al «tiempo de datos congelados» (20 s; 0 lo desactiva). Un sensor congelado es el que tiene un valor distinto de cero sin informar durante ese tiempo, o los dos sensores sin informar a la vez. Un lado en 0 W puede callar: el medidor de casa solo escribe el lado que cambia (`sensor.meter_import_from_grid` pasa horas en 0 sin informar mientras se exporta), y tratarlo como desconocido pararía el bucle todo el día.
   - Entidad de inyección cero desconocida: el bucle se pausa con motivo `mode_unknown`.
   - Condición global o de uso desconocida: la carga se deja como esté y su consumo no se reasigna (`global_unknown`, `condition_unknown`). No es un apagado global: que una entidad deje de informar no es que la condición falle.
   - Carga regulada fuera con sensor de potencia o entidad de regulación ilegibles: no disponible, se deja como esté.

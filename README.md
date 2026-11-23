@@ -29,7 +29,7 @@ When the global condition goes off, SolarSplit switches off the loads it switche
 
 Unavailable or unknown entities are unknown data, never 0 W:
 
-- If a grid reading is missing or frozen, the cycle decides nothing: the budget is `unknown`, the last decision is `none` with reason `grid_unknown`, and every delay mark starts again. A grid sensor is frozen when it reads a non-zero value that has not been reported for the *stale data timeout*, or when both grid sensors are quiet at once. A side resting at 0 W may stay quiet: meters only write the side that changes.
+- If a grid reading is missing or frozen, the cycle decides nothing: the budget is `unknown`, the last decision is `none` with reason `grid_unknown`, and every delay mark starts again. With a signed grid sensor, a reading not reported for the *stale data timeout* is frozen, whatever it reads. With separate export and import sensors, a sensor is frozen when it reads a non-zero value that has not been reported for the timeout, or when both are quiet at once: a side resting at 0 W may stay quiet, because meters only write the side that changes.
 - An unknown zero-injection entity pauses the loop (`mode_unknown`).
 - An unknown global condition or usage condition leaves the loads that depend on it as they are (`global_unknown`, `condition_unknown`): no switch-off, and their power is not reassigned.
 - A load regulated externally whose power sensor or regulation entity cannot be read is `unavailable` and left as it is.
@@ -95,6 +95,7 @@ To update later, download the update HACS shows and restart again. The loop's me
 2. Fill in:
    - **Grid export sensor**: power exported to the grid, in W (for example `sensor.meter_export_to_grid`).
    - **Grid import sensor**: power imported from the grid, in W, from the same meter.
+   - Or, instead of those two, a **Signed grid power sensor** with its **Sign** (export negative or positive). Use one mode or the other, not both.
    - **Global condition** (*Condición global*): `input_boolean.casa_activada`.
    - **PV power sensor** and **Zero-injection mode entity**: optional. Zero-injection probing is not implemented yet; while that entity is on, the loop pauses and leaves every load alone.
    - Keep the loop defaults (5 s cycle, 100 W safety margin, 30 s smoothing and settle time, 100 W switch-on margin, 150 W import tolerance, 20 s stale data timeout).
@@ -168,8 +169,10 @@ All settings live in the UI; there is no YAML. They can be changed later from th
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| Grid export sensor | — | Power exported to the grid (W). Main signal of the loop. |
-| Grid import sensor | — | Power imported from the grid (W). Used to detect a deficit. |
+| Signed grid power sensor | none | One sensor with the grid power (W), export and import with opposite signs. Use either this one or both the export and import sensors. |
+| Sign of the grid sensor | export negative | Whether the signed sensor shows export as negative or positive. |
+| Grid export sensor | none | Power exported to the grid (W). With the import sensor, instead of a signed sensor. |
+| Grid import sensor | none | Power imported from the grid (W). With the export sensor, instead of a signed sensor. |
 | PV power sensor | none | PV production (W). Needed for zero-injection mode. |
 | Zero-injection mode entity | none | When on, the loop probes loads instead of reading export. |
 | Global condition | none | When off, the loop switches off the loads it switched on that respect it, and leaves the rest as they are. |

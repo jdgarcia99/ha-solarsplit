@@ -21,6 +21,8 @@ from custom_components.solarsplit.const import (
     CONF_CONDITION_ENTITY,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_GRID_SENSOR,
+    CONF_GRID_SIGN,
     CONF_HOURS_SENSOR,
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
@@ -46,6 +48,8 @@ from custom_components.solarsplit.const import (
     CONF_TARGET_HOURS,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
+    GRID_SIGN_EXPORT_NEGATIVE,
+    GRID_SIGN_EXPORT_POSITIVE,
     LOAD_TYPE_REGULABLE,
     SUBENTRY_LOAD,
 )
@@ -800,3 +804,63 @@ async def test_restart_leaves_other_limits(
     entry, _ = await _setup_termo(hass, limit=limit, mode=mode)
     assert calls == []
     assert entry.runtime_data.memory[_sid(TERMO)].lowered is (lowered and limit < 1600)
+
+
+GRID = "sensor.grid_power"
+
+
+async def _setup_signed(hass: HomeAssistant, value: float, sign: str | None = None) -> MockConfigEntry:
+    hass.states.async_set(GRID, str(value), {"unit_of_measurement": "W"})
+    settings = {CONF_GRID_SENSOR: GRID, CONF_EXPORT_SENSOR: None, CONF_IMPORT_SENSOR: None}
+    if sign is not None:
+        settings[CONF_GRID_SIGN] = sign
+    return await _setup(hass, **settings)
+
+
+async def _signed_cycle(hass: HomeAssistant, entry: MockConfigEntry, value: float | str) -> None:
+    hass.states.async_set(GRID, str(value), {"unit_of_measurement": "W"})
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+
+
+@pytest.mark.parametrize(
+    ("sign", "export", "imp"),
+    [(None, -1500, 400), (GRID_SIGN_EXPORT_NEGATIVE, -1500, 400), (GRID_SIGN_EXPORT_POSITIVE, 1500, -400)],
+)
+async def test_signed_grid_sensor(hass: HomeAssistant, sign: str | None, export: float, imp: float) -> None:
+    """The default sign is export negative."""
+    entry = await _setup_signed(hass, 0, sign)
+    await _signed_cycle(hass, entry, export)
+    assert float(_state(hass, entry, "budget")) == 1400
+    assert _state(hass, entry, "load_reason", POOL) == "fits"
+    await _signed_cycle(hass, entry, imp)
+    assert float(_state(hass, entry, "budget")) == -500
+
+
+async def test_signed_grid_sensor_ignores_the_split_sensors(hass: HomeAssistant) -> None:
+    hass.states.async_set(GRID, "-1500", {"unit_of_measurement": "W"})
+    entry = await _setup(hass, **{CONF_GRID_SENSOR: GRID})  # export and import are still set: ignored
+    await _cycle(hass, entry, export=0, imp=3000)
+    assert float(_state(hass, entry, "budget")) == 1400
+
+
+async def test_signed_grid_sensor_frozen_even_at_zero(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+    """One sensor has no quiet side: not reported within the timeout is unknown, whatever it reads."""
+    entry = await _setup_signed(hass, 0)
+    freezer.tick(timedelta(seconds=20))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    assert _state(hass, entry, "load_reason", POOL) == "no_budget"
+    freezer.tick(timedelta(seconds=1))
+    await entry.runtime_data.async_refresh()
+    await hass.async_block_till_done()
+    _assert_grid_unknown(hass, entry)
+    await _signed_cycle(hass, entry, 0)  # reported again, same value
+    assert _state(hass, entry, "load_reason", POOL) == "no_budget"
+
+
+@pytest.mark.parametrize("value", [STATE_UNAVAILABLE, STATE_UNKNOWN, "garbage"])
+async def test_signed_grid_sensor_unusable(hass: HomeAssistant, value: str) -> None:
+    entry = await _setup_signed(hass, -1500)
+    await _signed_cycle(hass, entry, value)
+    _assert_grid_unknown(hass, entry)

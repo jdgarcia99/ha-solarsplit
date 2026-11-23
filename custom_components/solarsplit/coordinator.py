@@ -27,6 +27,8 @@ from .const import (
     CONF_CYCLE_INTERVAL,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_GRID_SENSOR,
+    CONF_GRID_SIGN,
     CONF_HOURS_SENSOR,
     CONF_HVAC_MODE,
     CONF_IMPORT_SENSOR,
@@ -60,6 +62,7 @@ from .const import (
     CONF_VARIABLE_ENTITY,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
+    GRID_SIGN_EXPORT_NEGATIVE,
     LOAD_TYPE_REGULABLE,
 )
 from .engine import (
@@ -382,12 +385,22 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
     def _grid(self, now: float) -> tuple[float, float] | None:
         """Raw export and import in W, or None if a reading is missing or frozen.
 
+        One signed sensor is frozen when it has not been reported within the timeout.
         A meter split into two sensors only writes the side that changes, so a side
-        resting at 0 W can stay quiet for hours while the other one moves. Frozen
-        data is a non-zero reading that has not been reported within the timeout,
-        or both sides quiet at once.
+        resting at 0 W can stay quiet for hours while the other one moves: there,
+        frozen data is a non-zero reading that has not been reported within the
+        timeout, or both sides quiet at once.
         """
         timeout = self.settings[CONF_STALE_TIMEOUT]
+        if (signed := self.settings[CONF_GRID_SENSOR]) is not None:
+            state = self._state(signed)
+            if (value := read_watts(state)) is None:
+                return None
+            if timeout and now - state.last_reported.timestamp() > timeout:
+                return None
+            if self.settings[CONF_GRID_SIGN] == GRID_SIGN_EXPORT_NEGATIVE:
+                value = -value
+            return max(value, 0.0), max(-value, 0.0)
         readings: list[tuple[float, bool]] = []
         for key in (CONF_EXPORT_SENSOR, CONF_IMPORT_SENSOR):
             state = self._state(self.settings[key])
