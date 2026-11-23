@@ -521,9 +521,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             if load.id in decision.target_reached:
                 memory.target_done = self._today
 
-        if not self.shadow:
-            for load_id, value in decision.writes.items():
-                await self._async_write_limit(self.load(load_id), value, now)
+        for load_id, value in decision.writes.items():
+            await self._async_write_limit(self.load(load_id), value, now)
         if decision.action is not Action.NONE and not self.shadow:
             await self._async_execute(decision, now)
         self.save_memory()
@@ -553,7 +552,12 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         _LOGGER.debug("Switched %s %s (budget %.0f W)", load.entity_id, "on" if on else "off", decision.budget)
 
     async def _async_write_limit(self, load: LoadConfig, value: float, now: float) -> None:
-        """Write a regulable load's power limit and remember it."""
+        """Write a regulable load's power limit and remember it. Never in shadow mode.
+
+        Every write goes through here, so this is the one place that guards it.
+        """
+        if self.shadow:
+            return
         try:
             written = await async_set_limit(self.hass, load.limit_entity, value)
         except HomeAssistantError as err:
@@ -566,8 +570,6 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
 
     async def async_release_limits(self) -> None:
         """Give every regulable load SolarSplit lowered its maximum back (on unload)."""
-        if self.shadow:
-            return
         now = dt_util.utcnow().timestamp()
         for load in self.loads:
             if load.regulable and self.memory[load.id].lowered:

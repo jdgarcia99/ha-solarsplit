@@ -728,3 +728,43 @@ async def test_diagnostics_serialise(hass: HomeAssistant, freezer: FrozenDateTim
     diagnostics = await async_get_config_entry_diagnostics(hass, entry)
     assert diagnostics["last_cycle"]["decision"]["target_reached"] == (_sid(POOL),)
     json.loads(json_dumps(diagnostics))
+
+
+def _saved_termo(hass_storage: dict, now: float, lowered: bool = True) -> None:
+    """Memory as a previous run left it: SolarSplit lowered the heater's limit."""
+    memory = {"managed": True, "last_seen": True, "last_change": now - 3600,
+              "lowered": lowered, "limit_written": now - 60}
+    hass_storage[f"{DOMAIN}.{ENTRY_ID}"] = {
+        "version": 1, "minor_version": 1, "key": f"{DOMAIN}.{ENTRY_ID}",
+        "data": {"saved_at": now - 30, "active": True, "last_action": None, "loads": {_sid(TERMO): memory}},
+    }
+
+
+@pytest.mark.parametrize("mode", ["Auto", "Manual"])
+async def test_shadow_mode_never_writes_the_limit(
+    hass: HomeAssistant, hass_storage: dict, freezer: FrozenDateTimeFactory, mode: str
+) -> None:
+    """Not to lower it, not to give it back: at start, in every cycle, with either switch, on unload."""
+    _saved_termo(hass_storage, freezer().timestamp())
+    calls = async_mock_service(hass, "number", "set_value")  # also catches the start, before the first cycle
+    entry, late_calls = await _setup_termo(hass, shadow=True, limit=400, mode=mode)
+    coordinator = entry.runtime_data
+    assert coordinator.memory[_sid(TERMO)].lowered is True
+
+    await _cycle(hass, entry, export=80)  # Auto: the pool wants to enter, the heater would get 430 W
+    if mode == "Auto":
+        assert _state(hass, entry, "load_reason", TERMO) == "limited"
+        assert _attr(hass, entry, TERMO, "limit") == 430
+        await _cycle(hass, entry, export=3000)  # would raise it to the maximum
+        assert _attr(hass, entry, TERMO, "limit") == 1600
+    else:  # would give the maximum back
+        assert _state(hass, entry, "load_state", TERMO) == "external"
+        assert _attr(hass, entry, TERMO, "limit") is None
+
+    for switch in (f"{_sid(TERMO)}_managed", f"{ENTRY_ID}_active"):
+        await hass.services.async_call("switch", "turn_off", {"entity_id": _entity(hass, switch, "switch")}, blocking=True)
+        await hass.async_block_till_done()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+    assert calls == [] and late_calls == []
+    assert coordinator.memory[_sid(TERMO)].lowered is True  # nothing was written, nothing forgotten

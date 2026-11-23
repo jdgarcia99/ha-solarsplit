@@ -2,6 +2,7 @@
 
 ## 0.2.0 (unreleased)
 
+- Shadow mode never writes a regulable load's limit, not to lower it nor to give it back: the check sits in the one function that writes it. A test covers every path (cycle, switches, unload, start).
 - Docs: the water heater is a regulable load behind the x10derivador (FreeDS is gone), with its configuration in the README; its safety cut (the Shelly) is independent of SolarSplit and is not implemented in it.
 - Daily target per load, in a collapsible *Daily target* section: hours on today sensor (or SolarSplit's own count), target hours from an entity (`input_number`, `number` or `sensor`) or a fixed value. Once reached, the load is not eligible until the next day (reason `target_reached`) and is switched off after its minimum on time.
 - New per-load sensor *Time on today* (h): SolarSplit's own count of the hours the load was on today, reset at local midnight, kept across restarts.
