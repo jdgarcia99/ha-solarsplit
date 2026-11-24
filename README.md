@@ -23,6 +23,8 @@ Power already used by managed loads is added back, because it can be reassigned.
 
 A load only switches on after the surplus has covered it for its switch-on delay, and only switches off after the deficit has lasted its switch-off delay. Loads regulated elsewhere are never switched but their power counts; [regulable loads](#regulable-loads), such as a water heater behind a diverter, get a power limit instead. If someone else switches a load, SolarSplit stops controlling it until it returns to the state SolarSplit set. A load that something else switches **off** (a safety cut, a person, an automation) is `blocked` with reason `switched_off`: SolarSplit never switches it back on, whatever *Respect manual changes* says, until it is on again or its **Manage** switch is turned off and on. This is not detected in shadow mode, where every switch-off comes from your automations.
 
+A load can have a **daily objective**: a minimum of hours guaranteed before a deadline, completed from the grid in the cheapest hours when the expected surplus is not enough, and a maximum used only with surplus (see [Objectives and grid fill](#objectives-and-grid-fill)). An **urgency entity** can put a load first for a while: for example the water heater while TankWise says its plan is at risk.
+
 When the global condition goes off, SolarSplit switches off the loads it switched on itself and that respect the condition (respecting their minimum on time); loads switched by hand and loads that ignore the condition are left alone. Turning the master switch off, instead, leaves every load as it is.
 
 ### Unknown data
@@ -41,6 +43,25 @@ All SolarSplit entities get the label **Gestión de excedentes**, created if it 
 ### Shadow mode
 
 Shadow mode is **on by default**. The loop runs every cycle and updates all its entities, but never calls a service on a load. Compare its decisions with your current automations for a while, then turn shadow mode off in the integration's settings. Turning a load's **Manage** switch off, or the master switch off, hands the load back to your automations at any time.
+
+### Objectives and grid fill
+
+A relay load (such as the pool pump) can have a minimum of hours per day, to be met before a deadline. The day of the objective starts at its *day start* (00:00 by default; 17:00 with a deadline of 09:00 counts from the evening to the next morning, to use the night's prices). Hours count from that start, by SolarSplit's own count or an hours sensor.
+
+- **Expected surplus.** SolarSplit learns the surplus of every hour of the day from what it sees (the median of the hourly means of the last 7 days, kept across restarts). An hour whose expected surplus covers the load counts as done by the sun.
+- **Cost of an hour.** The sell price for the part covered by the expected surplus (what that energy would have earned exported) and the buy price for the rest. Prices come from the attributes `price_00h`…`price_23h` of the buy and sell price sensors (the ESIOS PVPC and injection sensors); tomorrow's from `price_next_day_00h`… when published, otherwise the same hour of today is the estimate.
+- **Plan.** Every hour, and whenever the prices change, SolarSplit plans for each load whose minimum is missing: pending = minimum − done. If the expected surplus before the deadline is not enough, it picks the cheapest hours needed before the deadline, those of the load's *preferred window* first (for example 10:00–17:00 for the pool pump, to make use of partial sun and the low midday prices). In those hours the load is switched on from the grid (reason `grid_fill`), with no switch-on delay but respecting its minimum off time; it stops as soon as the minimum is met. Without prices, the last hours before the deadline are used (reason `grid_fill_no_price`).
+- **Contracted power.** Loads in grid fill never take the import over the contracted power less the grid fill margin: in the plan (if they do not fit together, the next cheapest hours are used) and live (a load is not switched on, or is switched off at once, with reason `grid_limit`). With the contracted power unknown (0), only one load fills from the grid in each hour.
+- **Grid fill power is not surplus.** A load in grid fill is not counted in the budget, so the loads behind it cannot reassign its power.
+- **Priority until the minimum.** While the minimum is missing before the deadline the load uses this priority; afterwards, its normal one. The *State* sensor shows the `effective_priority`.
+- **Maximum.** Once the hours reach the maximum, the load is not used until the next objective day (reason `target_reached`).
+- In shadow mode the plan is published (hours, kWh and estimated cost) and nothing is switched.
+
+The water heater is not planned by SolarSplit: TankWise plans it and heats from the grid by putting the diverter in Manual mode. A minimum is only for relay loads.
+
+### Urgency
+
+A load can have an **urgency entity** (a binary sensor) and an urgency priority. While the entity is on, the load uses the urgency priority instead of its normal one or the one until the minimum; on a tie, the urgent load goes first. With `binary_sensor.tankwise_plan_at_risk` on the water heater, the sun goes to hot water first when TankWise will not make it. An unknown urgency entity is not urgency.
 
 Planned: zero-injection mode (probing loads when the inverter limits export), hourly net balance mode and `force_on` / `force_off` / `recalculate` services.
 
@@ -61,12 +82,15 @@ One device per load:
 | Entity | Description |
 | --- | --- |
 | Manage (switch) | Include or exclude the load without deleting it. |
-| State (sensor) | `on`, `off`, `waiting` (a change is wanted), `blocked`, `manual`, `unmanaged` or `unavailable`. |
+| State (sensor) | `on`, `off`, `waiting` (a change is wanted), `blocked`, `manual`, `unmanaged` or `unavailable`; attributes `power`, `effective_priority` and, for a regulable load, `limit` and `saturated`. |
 | Reason (sensor) | Why, for example `no_budget`, `on_delay`, `min_on_time` or `not_eligible`. |
 | Priority (number) | Applied on the fly, without reloading; also stored in the load's settings. |
 | Time on today (sensor, h) | Hours the load has been on today, counted by SolarSplit from the load's state (whoever switched it). Resets at local midnight and survives restarts. |
 | Request active (binary sensor) | On-demand loads only: on while a request is active. |
 | Learned power (sensor, W) | Loads with a circuit sensor only: mean of the valid measurements of its circuit's jumps; attributes `measurements`, `last_measurement` and `in_use`. |
+| Pending hours (sensor, h) | Loads with a minimum only: hours missing to the minimum in the objective's day; attributes `done`, `minimum`, `maximum` and `day_start`. |
+| Deadline (sensor, timestamp) | Loads with a minimum only: when the minimum must be met. |
+| Estimated cost (sensor, currency) | Loads with a minimum only: cost of the plan (surplus hours at the sell price, grid hours at the effective price); attribute `plan` with every planned hour (`start`, `hours`, `kwh`, `grid`, `buy`, `sell`, `price`, `cost`, `estimated`), plus `grid_hours`, `grid_kwh`, `short_hours` (hours that fit nowhere before the deadline) and `priced`. |
 
 Diagnostics (on the integration's menu) include the settings, every load and the last cycle.
 
@@ -124,7 +148,7 @@ On **Settings → Devices & services → SolarSplit**, click **Add load** (*Aña
 | **Respect manual changes** | Leave ticked. |
 | **Climate mode when on** | Only for `climate` entities (usually `cool`). |
 | **Regulated externally when** | Leave empty (it was for the heater with FreeDS; the heater is now a regulable load). |
-| **Daily target** | For the pool pump: *Hours on today sensor* `sensor.piscina_on_hoy` and a *Target hours entity* with today's hours. The hours per season live in `input_number.horas_invierno_piscina` and `input_number.horas_verano_piscina`, chosen by `input_select.temporada_piscina`: give SolarSplit one entity, such as a template sensor helper that picks the right one. |
+| **Daily objective** | For the pool pump: a *Minimum hours entity* with today's hours, a deadline (for example 20:00), a preferred window 10:00–17:00 and a *Priority until the minimum*. The hours per season live in `input_number.horas_invierno_piscina` and `input_number.horas_verano_piscina`, chosen by `input_select.temporada_piscina`: give SolarSplit one entity, such as a template sensor helper that picks the right one. Set the buy and sell price sensors and the contracted power in the integration's settings. |
 
 #### The water heater with the x10derivador
 
@@ -145,8 +169,11 @@ The heater's diverter (x10derivador, ESPHome) regulates the heater itself, aimin
 | Automatic mode value | `Auto` (the other options, `Manual` and `Apagado`, make the load `external`: its power is grid power) |
 | Minimum / maximum limit | 0 / 1600 W (the heater's element) |
 | Smallest change written / minimum time between writes | 100 W / 30 s |
+| Output entity | `sensor.coladuria_x10_derivador_consigna` (the diverter's duty, %) |
+| ***Manual control, season and urgency* section** | |
+| Urgency entity / priority | `binary_sensor.tankwise_plan_at_risk` / 1: the sun goes to hot water first while TankWise will not make it |
 
-Leave `switch.coladuria_x10_derivador_modo_manual`, the grid target and `sensor.coladuria_x10_derivador_consigna` to the diverter: SolarSplit only reads the mode select and writes the maximum power.
+Leave `switch.coladuria_x10_derivador_modo_manual` and the grid target to the diverter, and grid heating to TankWise: SolarSplit only reads the mode select and the duty, and writes the maximum power.
 
 > **Safety.** The heater's protection (the Shelly cutting `switch.termo`) is independent of SolarSplit and must stay that way: SolarSplit never implements it, never switches `switch.termo`, and while it is off the heater is `blocked`. SolarSplit can only lower the diverter's maximum power, and it gives it back when it stops managing the heater.
 
@@ -179,6 +206,10 @@ All settings live in the UI; there is no YAML. They can be changed later from th
 | Zero-injection mode entity | none | When on, the loop probes loads instead of reading export. |
 | Global condition | none | When off, the loop switches off the loads it switched on that respect it, and leaves the rest as they are. |
 | Season entity | none | `input_select` or `select` with the current season. Loads can be limited to some of its options (see *Manual control and season*). |
+| Buy price sensor | none | Price of the energy bought (€/kWh) with the attributes `price_00h`…`price_23h`, such as `sensor.pvpc`. Empty: no prices, grid fill uses the last hours before the deadline. |
+| Sell price sensor | none | Price of the energy exported, with the same attributes, such as `sensor.esios_injection_price`. Empty: an hour with surplus costs nothing. |
+| Contracted power | 0 W | Grid power you may draw (for example 9200 W). 0: unknown, one load at a time in grid fill. |
+| Grid fill margin | 1000 W | Kept below the contracted power for the rest of the house while loads fill from the grid. |
 | Cycle interval | 5 s | How often the control loop runs. |
 | Safety margin | 100 W | Power never handed out to loads. |
 | Smoothing window | 30 s | Moving average applied to the readings. |
@@ -211,7 +242,7 @@ Each load is a subentry: on the integration's page, use **Add load**, and edit o
 | Climate mode when on | cool | For `climate` entities. |
 | Regulated externally when | none | Relay loads only. While this entity is on, the load is never switched but its power counts. |
 
-The **Manual control and season** section of the form (collapsed unless one of them is set):
+The **Manual control, season and urgency** section of the form (collapsed unless one of them is set):
 
 | Setting | Default | Description |
 | --- | --- | --- |
@@ -219,6 +250,8 @@ The **Manual control and season** section of the form (collapsed unless one of t
 | Manage again automatically | off | When **Manage** is switched off, it switches back on by itself when the load goes off, or at the time below, whichever comes first. |
 | Manage again at | 00:00 | Local time at which Manage switches back on. |
 | Seasons | all year | Options of the season entity in which the load is used. Shown only when a season entity is set; empty: all year. |
+| Urgency entity | none | Binary sensor, input boolean or switch. While on, the load uses the urgency priority (see [Urgency](#urgency)). |
+| Urgency priority | 1 | Priority while the urgency entity is on. |
 
 - **On demand.** Switching the load on from anywhere but SolarSplit (a person, an automation, a remote) starts a **request**; switching it off from anywhere but SolarSplit ends it. While the request lasts, the load is managed with its priority: SolarSplit switches it off when the surplus runs out (after its delays and minimum on time) and back on when the surplus returns; that switch-off does not end the request. Without a request it is never switched on, even first in line with surplus (reason `waiting_request`), and its power is the house's. A climate gets back, when switched on again, the HVAC mode, target temperature and fan mode that were set when it was asked for, not the load's *Climate mode when on*. The request is kept across restarts; the binary sensor **Request active** shows it. In shadow mode requests are followed the same way and the decisions are only published.
 - **Manage off.** While Manage is off the load's power is not reassigned: it counts as the house's consumption.
@@ -233,15 +266,22 @@ A circuit meter measures several appliances at once (all the air conditioners on
 - The last 10 valid measurements are kept (across restarts). From 3 on, their mean replaces the nominal power, to decide the switch-on and to count the load's power while it is on. A load's own power sensor always wins.
 - A `climate` load's power varies with its compressor: while it is on, it counts at least its share of the circuit (the circuit's power divided among the loads of the circuit that are on), so the surplus is not overestimated.
 
-The **Daily target** section of the form (collapsed unless a target is set):
+The **Daily objective** section of the form (collapsed unless a minimum or maximum is set):
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| Hours on today sensor | none | Hours the load has been on today (`h`, `min` or `s`). Empty: SolarSplit's own count, the load's *Time on today* sensor. |
-| Target hours entity | none | `input_number`, `number` or `sensor` with the hours wanted today. Takes precedence over the fixed value. |
-| Target hours | 0 | Fixed hours wanted per day when there is no target entity. 0: no daily target. |
+| Minimum hours | 0 | Hours guaranteed before the deadline, from the grid if the surplus is not enough. 0: no minimum. Relay loads only. |
+| Minimum hours entity | none | `input_number`, `number` or `sensor` with the minimum, so another integration can publish it. Takes precedence over the fixed value. |
+| Maximum hours | 0 | Hours per day used only with surplus. 0: no maximum. |
+| Maximum hours entity | none | Same, from an entity. Takes precedence over the fixed value. |
+| Day start | 00:00 | Local time at which the objective's day starts and its hours count from zero. |
+| Deadline | end of the day | Local time by which the minimum must be met. |
+| Deadline entity | none | `input_datetime`, `time` or timestamp `sensor` with the deadline. Takes precedence over the fixed value. |
+| Priority until the minimum | 0 | Priority while the minimum is missing before the deadline. 0: the normal one. |
+| Preferred window from / to | none | Grid fill uses these hours first. Both or neither. |
+| Hours done sensor | none | Hours on in the objective's day (`h`, `min` or `s`). Empty: SolarSplit's own count since the day start. |
 
-Once the hours on today reach the target, the load is not eligible until the next day (reason `target_reached`): SolarSplit switches it off after its minimum on time, and it stays `blocked` even if the target is raised later that day. A regulable load gets its minimum limit instead. Turning **Manage** off and on clears it. While the hours or the target cannot be read, the load is left as it is (`condition_unknown`).
+Once the hours reach the maximum, the load is not eligible until the next objective day (reason `target_reached`): SolarSplit switches it off after its minimum on time, and it stays `blocked` even if the maximum is raised later that day. A regulable load gets its minimum limit instead. Turning **Manage** off and on clears it. While the hours or the maximum cannot be read, the load is left as it is (`condition_unknown`). While the minimum or the deadline cannot be read, nothing is planned.
 
 The **Regulable load** section of the form (collapsed unless the type is Regulable):
 
@@ -253,6 +293,7 @@ The **Regulable load** section of the form (collapsed unless the type is Regulab
 | Minimum / maximum limit | 0 / 2000 W | SolarSplit never writes outside this range, and writes the maximum back when it stops limiting the load. |
 | Smallest change written | 100 W | A new limit is written only if it moves by at least this much, or reaches the minimum or maximum. |
 | Minimum time between writes | 30 s | So the device is not flooded with writes. |
+| Output entity | none | `sensor` or `number` with the device's output in % (the diverter's duty). At 99 % or more for a minute the load is saturated. |
 
 ### Regulable loads
 
@@ -262,7 +303,7 @@ A regulable load regulates its own power, like a diverter that sends the surplus
   - If nothing ahead of it uses or is about to use the budget (it has the highest priority, or the loads ahead are off and stay off), its limit is its **maximum** (reason `full_power`).
   - Otherwise its limit is what the loads ahead leave, within the minimum and maximum (reason `limited`). The limit is rounded down to the entity's step.
   - With its usage condition off, its limit is the minimum (`not_eligible`).
-  - Loads after it get what it does not use.
+  - Until it is **saturated** it keeps, for the priority walk, what it could take up to its limit: a relay load behind it does not start with surplus the regulable load could still absorb. It is saturated when it cannot take more for a minute: its output entity is at 99 % or more, or surplus is still exported (more than 150 W) while it draws well below its limit (a thermostat cut). Then the loads behind it get what it does not use. The State sensor shows `saturated`.
 - **Any other mode** (Manual, Off…): its power is grid power. It is not reassigned and the load is shown as `external`.
 - **Its switch off** (a safety cut, for example): `blocked` with reason `switched_off`.
 - **Giving it back:** when SolarSplit stops limiting a load it lowered (master switch off, Manage off, other mode, global condition off, integration unloaded or disabled), it writes the maximum back at once.

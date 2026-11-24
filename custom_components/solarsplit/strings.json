@@ -23,7 +23,11 @@
           "stale_timeout": "Stale data timeout",
           "grid_sensor": "Signed grid power sensor",
           "grid_sign": "Sign of the grid sensor",
-          "season_entity": "Season entity"
+          "season_entity": "Season entity",
+          "buy_price_sensor": "Buy price sensor",
+          "sell_price_sensor": "Sell price sensor",
+          "contracted_power": "Contracted power",
+          "grid_margin": "Grid fill margin"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
@@ -41,7 +45,11 @@
           "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check.",
           "grid_sensor": "One sensor with the grid power, export and import with opposite signs. Use either this one or both the export and import sensors. With one sensor, a reading not reported within the stale data timeout is unknown.",
           "grid_sign": "Only for the signed grid sensor: whether export is negative or positive.",
-          "season_entity": "Optional input select or select with the current season. Loads can be limited to some of its options."
+          "season_entity": "Optional input select or select with the current season. Loads can be limited to some of its options.",
+          "buy_price_sensor": "Price of the energy bought, in €/kWh, with the attributes price_00h…price_23h (for example the PVPC sensor of the ESIOS integration). Tomorrow's prices are read from price_next_day_00h… when published; until then the same hour of today is the estimate. Empty: no prices, and grid fill uses the last hours before each deadline.",
+          "sell_price_sensor": "Price of the energy exported, in €/kWh, with the same attributes. An hour with expected surplus costs this price; empty: it costs nothing.",
+          "contracted_power": "Grid power you may draw. Loads filling their minimum from the grid never take the import over this power less the margin, in the plan and live. 0: unknown, only one load fills from the grid at a time.",
+          "grid_margin": "Power kept below the contracted power for the rest of the house while loads fill from the grid."
         }
       }
     },
@@ -69,7 +77,11 @@
           "stale_timeout": "Stale data timeout",
           "grid_sensor": "Signed grid power sensor",
           "grid_sign": "Sign of the grid sensor",
-          "season_entity": "Season entity"
+          "season_entity": "Season entity",
+          "buy_price_sensor": "Buy price sensor",
+          "sell_price_sensor": "Sell price sensor",
+          "contracted_power": "Contracted power",
+          "grid_margin": "Grid fill margin"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
@@ -87,7 +99,11 @@
           "stale_timeout": "A non-zero grid reading not reported for longer than this, or both grid sensors quiet, counts as unknown and the loop decides nothing. 0 disables the check.",
           "grid_sensor": "One sensor with the grid power, export and import with opposite signs. Use either this one or both the export and import sensors. With one sensor, a reading not reported within the stale data timeout is unknown.",
           "grid_sign": "Only for the signed grid sensor: whether export is negative or positive.",
-          "season_entity": "Optional input select or select with the current season. Loads can be limited to some of its options."
+          "season_entity": "Optional input select or select with the current season. Loads can be limited to some of its options.",
+          "buy_price_sensor": "Price of the energy bought, in €/kWh, with the attributes price_00h…price_23h (for example the PVPC sensor of the ESIOS integration). Tomorrow's prices are read from price_next_day_00h… when published; until then the same hour of today is the estimate. Empty: no prices, and grid fill uses the last hours before each deadline.",
+          "sell_price_sensor": "Price of the energy exported, in €/kWh, with the same attributes. An hour with expected surplus costs this price; empty: it costs nothing.",
+          "contracted_power": "Grid power you may draw. Loads filling their minimum from the grid never take the import over this power less the margin, in the plan and live. 0: unknown, only one load fills from the grid at a time.",
+          "grid_margin": "Power kept below the contracted power for the rest of the house while loads fill from the grid."
         }
       }
     },
@@ -146,24 +162,28 @@
           },
           "sections": {
             "control": {
-              "name": "Manual control and season",
-              "description": "On demand, automatic return to management and the seasons in which the load is used.",
+              "name": "Manual control, season and urgency",
+              "description": "On demand, automatic return to management, seasons in which the load is used, and urgency.",
               "data": {
                 "on_demand": "Only on demand",
                 "auto_manage": "Manage again automatically",
                 "manage_at": "Manage again at",
-                "seasons": "Seasons"
+                "seasons": "Seasons",
+                "urgency_entity": "Urgency entity",
+                "urgency_priority": "Urgency priority"
               },
               "data_description": {
                 "on_demand": "The load is only used while someone asks for it: switching it on from anywhere else (a person, an automation, a remote) starts a request, and switching it off from anywhere else ends it. While the request lasts SolarSplit switches it off when the surplus runs out and back on when it returns; a climate gets back the mode, temperature and fan mode that were set. SolarSplit never switches it on without a request. Replaces Respect manual changes.",
                 "auto_manage": "When Manage is switched off, it switches back on by itself when the load goes off, or at the time below.",
                 "manage_at": "Local time at which Manage switches back on.",
-                "seasons": "The load is only used in these seasons of the season entity (global settings). Empty: all year. Out of season it is not used, and SolarSplit switches it off if it switched it on."
+                "seasons": "The load is only used in these seasons of the season entity (global settings). Empty: all year. Out of season it is not used, and SolarSplit switches it off if it switched it on.",
+                "urgency_entity": "Binary sensor, input boolean or switch. While it is on, the load uses the urgency priority instead of its normal one or the one until the minimum: for example a water heater that goes first when its plan is at risk. Unknown: not urgent.",
+                "urgency_priority": "Priority while the urgency entity is on (1 = first). On a tie, the urgent load goes first."
               }
             },
             "regulable": {
               "name": "Regulable load",
-              "description": "Only for the Regulable type. While the mode entity has the automatic value, the load's power is surplus: SolarSplit counts it and writes in the limit entity what the loads ahead of it leave (its maximum if nothing is ahead). In any other mode its power is grid power and the load is shown as external.",
+              "description": "Only for the Regulable type. While the mode entity has the automatic value, the load's power is surplus: SolarSplit counts it and writes in the limit entity what the loads ahead of it leave (its maximum if there are none). Until it is saturated it keeps what it could take up to its limit, so a load behind it does not start with that. In any other mode its power is grid power and the load is shown as external.",
               "data": {
                 "limit_entity": "Limit entity",
                 "mode_entity": "Mode entity",
@@ -171,7 +191,8 @@
                 "limit_min": "Minimum limit",
                 "limit_max": "Maximum limit",
                 "limit_threshold": "Smallest change written",
-                "limit_interval": "Minimum time between writes"
+                "limit_interval": "Minimum time between writes",
+                "output_entity": "Output entity"
               },
               "data_description": {
                 "limit_entity": "Number entity with the device's maximum power, for example the diverter's maximum power.",
@@ -180,21 +201,38 @@
                 "limit_min": "SolarSplit never writes less.",
                 "limit_max": "SolarSplit never writes more, and writes it back when it stops limiting the load.",
                 "limit_threshold": "A new limit is only written when it moves by at least this much, or reaches the minimum or maximum.",
-                "limit_interval": "So the device is not flooded with writes."
+                "limit_interval": "So the device is not flooded with writes.",
+                "output_entity": "Optional sensor or number with the device's output in % (for example the diverter's duty). At 99 % or more for a minute the load is saturated: it cannot take more, and the surplus it leaves goes to the loads behind it. Without it, a load that draws well below its limit while surplus is still exported for a minute is saturated (a thermostat cut)."
               }
             },
             "daily_target": {
-              "name": "Daily target",
-              "description": "Hours the load should run per day. Once they are reached, the load is not eligible until the next day: it is switched off (after its minimum on time) and stays off.",
+              "name": "Daily objective",
+              "description": "Hours the load must run each day: a minimum guaranteed before a deadline (relay loads only) and an optional maximum used only with surplus. The day starts at the day start time. If the expected surplus is not enough for the minimum, SolarSplit plans the cheapest hours before the deadline and switches the load on from the grid in them (grid fill). Once the maximum is reached the load is not used until the next day.",
               "data": {
-                "hours_sensor": "Hours on today sensor",
-                "target_entity": "Target hours entity",
-                "target_hours": "Target hours"
+                "min_hours": "Minimum hours",
+                "min_entity": "Minimum hours entity",
+                "target_hours": "Maximum hours",
+                "target_entity": "Maximum hours entity",
+                "day_start": "Day start",
+                "deadline": "Deadline",
+                "deadline_entity": "Deadline entity",
+                "min_priority": "Priority until the minimum",
+                "window_start": "Preferred window from",
+                "window_end": "Preferred window to",
+                "hours_sensor": "Hours done sensor"
               },
               "data_description": {
-                "hours_sensor": "Sensor with the hours the load has been on today, for example a history stats sensor. Empty: SolarSplit's own count (the load's Time on today sensor).",
-                "target_entity": "Input number or sensor with the hours wanted today. Takes precedence over the fixed value.",
-                "target_hours": "Fixed hours wanted per day, when there is no target entity. 0: no daily target."
+                "min_hours": "Hours guaranteed before the deadline, with the grid if the surplus is not enough. 0: no minimum. Only relay loads.",
+                "min_entity": "Input number, number or sensor with the minimum hours. It takes precedence over the fixed value.",
+                "target_hours": "Hours per day, only with surplus, if there is no maximum entity. Once reached the load is not used until the next day. 0: no maximum.",
+                "target_entity": "Input number, number or sensor with the maximum hours. It takes precedence over the fixed value.",
+                "day_start": "Local time at which the objective's day starts and its hours count from zero. For example 17:00 with a deadline of 09:00 uses the night.",
+                "deadline": "Local time by which the minimum must be met. Empty: the end of the objective's day.",
+                "deadline_entity": "Input datetime, time or timestamp sensor with the deadline, for another integration to publish it. It takes precedence over the fixed value.",
+                "min_priority": "Priority while the minimum is not met before the deadline; afterwards, the normal one. 0: always the normal one.",
+                "window_start": "Grid fill uses the hours of this window first (for example 10:00 to make use of partial sun and the low prices at midday), and others only if they are not enough.",
+                "window_end": "End of the preferred window. Both or neither.",
+                "hours_sensor": "Sensor with the hours on in the objective's day, for example one of history statistics. Empty: SolarSplit's own count since the day start."
               }
             }
           }
@@ -243,24 +281,28 @@
           },
           "sections": {
             "control": {
-              "name": "Manual control and season",
-              "description": "On demand, automatic return to management and the seasons in which the load is used.",
+              "name": "Manual control, season and urgency",
+              "description": "On demand, automatic return to management, seasons in which the load is used, and urgency.",
               "data": {
                 "on_demand": "Only on demand",
                 "auto_manage": "Manage again automatically",
                 "manage_at": "Manage again at",
-                "seasons": "Seasons"
+                "seasons": "Seasons",
+                "urgency_entity": "Urgency entity",
+                "urgency_priority": "Urgency priority"
               },
               "data_description": {
                 "on_demand": "The load is only used while someone asks for it: switching it on from anywhere else (a person, an automation, a remote) starts a request, and switching it off from anywhere else ends it. While the request lasts SolarSplit switches it off when the surplus runs out and back on when it returns; a climate gets back the mode, temperature and fan mode that were set. SolarSplit never switches it on without a request. Replaces Respect manual changes.",
                 "auto_manage": "When Manage is switched off, it switches back on by itself when the load goes off, or at the time below.",
                 "manage_at": "Local time at which Manage switches back on.",
-                "seasons": "The load is only used in these seasons of the season entity (global settings). Empty: all year. Out of season it is not used, and SolarSplit switches it off if it switched it on."
+                "seasons": "The load is only used in these seasons of the season entity (global settings). Empty: all year. Out of season it is not used, and SolarSplit switches it off if it switched it on.",
+                "urgency_entity": "Binary sensor, input boolean or switch. While it is on, the load uses the urgency priority instead of its normal one or the one until the minimum: for example a water heater that goes first when its plan is at risk. Unknown: not urgent.",
+                "urgency_priority": "Priority while the urgency entity is on (1 = first). On a tie, the urgent load goes first."
               }
             },
             "regulable": {
               "name": "Regulable load",
-              "description": "Only for the Regulable type. While the mode entity has the automatic value, the load's power is surplus: SolarSplit counts it and writes in the limit entity what the loads ahead of it leave (its maximum if nothing is ahead). In any other mode its power is grid power and the load is shown as external.",
+              "description": "Only for the Regulable type. While the mode entity has the automatic value, the load's power is surplus: SolarSplit counts it and writes in the limit entity what the loads ahead of it leave (its maximum if there are none). Until it is saturated it keeps what it could take up to its limit, so a load behind it does not start with that. In any other mode its power is grid power and the load is shown as external.",
               "data": {
                 "limit_entity": "Limit entity",
                 "mode_entity": "Mode entity",
@@ -268,7 +310,8 @@
                 "limit_min": "Minimum limit",
                 "limit_max": "Maximum limit",
                 "limit_threshold": "Smallest change written",
-                "limit_interval": "Minimum time between writes"
+                "limit_interval": "Minimum time between writes",
+                "output_entity": "Output entity"
               },
               "data_description": {
                 "limit_entity": "Number entity with the device's maximum power, for example the diverter's maximum power.",
@@ -277,21 +320,38 @@
                 "limit_min": "SolarSplit never writes less.",
                 "limit_max": "SolarSplit never writes more, and writes it back when it stops limiting the load.",
                 "limit_threshold": "A new limit is only written when it moves by at least this much, or reaches the minimum or maximum.",
-                "limit_interval": "So the device is not flooded with writes."
+                "limit_interval": "So the device is not flooded with writes.",
+                "output_entity": "Optional sensor or number with the device's output in % (for example the diverter's duty). At 99 % or more for a minute the load is saturated: it cannot take more, and the surplus it leaves goes to the loads behind it. Without it, a load that draws well below its limit while surplus is still exported for a minute is saturated (a thermostat cut)."
               }
             },
             "daily_target": {
-              "name": "Daily target",
-              "description": "Hours the load should run per day. Once they are reached, the load is not eligible until the next day: it is switched off (after its minimum on time) and stays off.",
+              "name": "Daily objective",
+              "description": "Hours the load must run each day: a minimum guaranteed before a deadline (relay loads only) and an optional maximum used only with surplus. The day starts at the day start time. If the expected surplus is not enough for the minimum, SolarSplit plans the cheapest hours before the deadline and switches the load on from the grid in them (grid fill). Once the maximum is reached the load is not used until the next day.",
               "data": {
-                "hours_sensor": "Hours on today sensor",
-                "target_entity": "Target hours entity",
-                "target_hours": "Target hours"
+                "min_hours": "Minimum hours",
+                "min_entity": "Minimum hours entity",
+                "target_hours": "Maximum hours",
+                "target_entity": "Maximum hours entity",
+                "day_start": "Day start",
+                "deadline": "Deadline",
+                "deadline_entity": "Deadline entity",
+                "min_priority": "Priority until the minimum",
+                "window_start": "Preferred window from",
+                "window_end": "Preferred window to",
+                "hours_sensor": "Hours done sensor"
               },
               "data_description": {
-                "hours_sensor": "Sensor with the hours the load has been on today, for example a history stats sensor. Empty: SolarSplit's own count (the load's Time on today sensor).",
-                "target_entity": "Input number or sensor with the hours wanted today. Takes precedence over the fixed value.",
-                "target_hours": "Fixed hours wanted per day, when there is no target entity. 0: no daily target."
+                "min_hours": "Hours guaranteed before the deadline, with the grid if the surplus is not enough. 0: no minimum. Only relay loads.",
+                "min_entity": "Input number, number or sensor with the minimum hours. It takes precedence over the fixed value.",
+                "target_hours": "Hours per day, only with surplus, if there is no maximum entity. Once reached the load is not used until the next day. 0: no maximum.",
+                "target_entity": "Input number, number or sensor with the maximum hours. It takes precedence over the fixed value.",
+                "day_start": "Local time at which the objective's day starts and its hours count from zero. For example 17:00 with a deadline of 09:00 uses the night.",
+                "deadline": "Local time by which the minimum must be met. Empty: the end of the objective's day.",
+                "deadline_entity": "Input datetime, time or timestamp sensor with the deadline, for another integration to publish it. It takes precedence over the fixed value.",
+                "min_priority": "Priority while the minimum is not met before the deadline; afterwards, the normal one. 0: always the normal one.",
+                "window_start": "Grid fill uses the hours of this window first (for example 10:00 to make use of partial sun and the low prices at midday), and others only if they are not enough.",
+                "window_end": "End of the preferred window. Both or neither.",
+                "hours_sensor": "Sensor with the hours on in the objective's day, for example one of history statistics. Empty: SolarSplit's own count since the day start."
               }
             }
           }
@@ -300,7 +360,9 @@
       "error": {
         "entity_in_use": "This entity already belongs to another load.",
         "regulable_incomplete": "A regulable load needs a power sensor, a limit entity and a mode entity.",
-        "limit_range": "The minimum limit must be lower than the maximum."
+        "limit_range": "The minimum limit must be lower than the maximum.",
+        "minimum_relay_only": "A minimum with a deadline is only for relay loads: a regulable load is never switched.",
+        "window_incomplete": "The preferred window needs both a start and an end."
       }
     }
   },
@@ -386,7 +448,10 @@
               "target_reached": "Daily target reached",
               "waiting_request": "Waiting for a request",
               "out_of_season": "Out of season",
-              "season_unknown": "Season unknown"
+              "season_unknown": "Season unknown",
+              "grid_fill": "Filling the minimum from the grid (cheapest hours)",
+              "grid_fill_no_price": "Filling the minimum from the grid (no prices: last hours)",
+              "grid_limit": "Grid fill would exceed the contracted power"
             }
           },
           "budget": {
@@ -415,6 +480,12 @@
           },
           "limit": {
             "name": "Power limit"
+          },
+          "effective_priority": {
+            "name": "Effective priority"
+          },
+          "saturated": {
+            "name": "Saturated"
           }
         }
       },
@@ -449,7 +520,10 @@
           "target_reached": "Daily target reached",
           "waiting_request": "Waiting for a request",
           "out_of_season": "Out of season",
-          "season_unknown": "Season unknown"
+          "season_unknown": "Season unknown",
+          "grid_fill": "Filling the minimum from the grid (cheapest hours)",
+          "grid_fill_no_price": "Filling the minimum from the grid (no prices: last hours)",
+          "grid_limit": "Grid fill would exceed the contracted power"
         }
       },
       "on_today": {
@@ -466,6 +540,46 @@
           },
           "in_use": {
             "name": "In use"
+          }
+        }
+      },
+      "objective_pending": {
+        "name": "Pending hours",
+        "state_attributes": {
+          "done": {
+            "name": "Hours done"
+          },
+          "minimum": {
+            "name": "Minimum"
+          },
+          "maximum": {
+            "name": "Maximum"
+          },
+          "day_start": {
+            "name": "Day start"
+          }
+        }
+      },
+      "objective_deadline": {
+        "name": "Deadline"
+      },
+      "objective_cost": {
+        "name": "Estimated cost",
+        "state_attributes": {
+          "plan": {
+            "name": "Plan"
+          },
+          "grid_hours": {
+            "name": "Grid hours"
+          },
+          "grid_kwh": {
+            "name": "Grid energy"
+          },
+          "short_hours": {
+            "name": "Hours that do not fit"
+          },
+          "priced": {
+            "name": "With prices"
           }
         }
       }

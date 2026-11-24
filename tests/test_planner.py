@@ -1,0 +1,126 @@
+"""Grid fill plan and expected surplus, without Home Assistant."""
+
+import pytest
+
+from custom_components.solarsplit.planner import (
+    PROFILE_DAYS,
+    Request,
+    Slot,
+    SurplusProfile,
+    plan,
+)
+
+H = 3600.0
+# A November day like the real one: buying is cheapest at midday and dear from 17:00 to 23:00,
+# selling is worth almost nothing at midday.
+BUY = [0.17, 0.13, 0.10, 0.11, 0.10, 0.10, 0.11, 0.19, 0.24, 0.19, 0.18, 0.12,
+       0.12, 0.12, 0.055, 0.105, 0.17, 0.27, 0.37, 0.38, 0.39, 0.39, 0.30, 0.28]
+SELL = [0.12, 0.09, 0.06, 0.06, 0.06, 0.06, 0.07, 0.14, 0.17, 0.12, 0.05, 0.005,
+        0.005, 0.005, 0.007, 0.05, 0.10, 0.18, 0.20, 0.21, 0.23, 0.22, 0.20, 0.19]
+
+
+def _day(surplus: dict[int, float] | None = None, prices: bool = True) -> list[Slot]:
+    """24 hourly slots from t = 0 (hour 0)."""
+    return [
+        Slot(h * H, (h + 1) * H, BUY[h] if prices else None, SELL[h] if prices else None, (surplus or {}).get(h, 0.0))
+        for h in range(24)
+    ]
+
+
+def _pump(pending: float, deadline: float = 17 * H, **kw) -> Request:
+    return Request(**{"load_id": "pool", "priority": 1, "power_w": 530, "pending_h": pending, "deadline": deadline, **kw})
+
+
+def _hours(p, grid: bool) -> list[int]:
+    return [int(slot.start // H) for slot in p.slots if slot.grid is grid]
+
+
+def test_minimum_met_with_sun_only() -> None:
+    slots = _day({11: 1500, 12: 2000, 13: 1800, 14: 900})
+    p = plan(8 * H, slots, [_pump(4)], None)["pool"]
+    assert _hours(p, grid=True) == [] and _hours(p, grid=False) == [11, 12, 13, 14]
+    assert p.short_h == 0 and not p.fill_at(9 * H)
+    # Each surplus hour costs what that energy would have earned exported
+    assert p.cost == pytest.approx(0.53 * (0.005 + 0.005 + 0.005 + 0.007))
+
+
+def test_completed_with_the_grid_in_the_cheapest_hours_of_the_window() -> None:
+    # No sun, from 08:00. The window is 10:00-17:00: 14:00 (0.055), 15:00 (0.105) and 11:00
+    # (0.12, the earliest of three at that price), never 09:00 or 08:00 while the window has room.
+    window = frozenset(h * H for h in range(10, 17))
+    p = plan(8 * H, _day(), [_pump(3, preferred=window)], None)["pool"]
+    assert _hours(p, grid=True) == [11, 14, 15]
+    assert p.fill_at(14 * H + 60) and not p.fill_at(13 * H)
+    # More than the window has: the rest from the cheapest hour outside it (09:00, not 08:00)
+    p = plan(8 * H, _day(), [_pump(8, preferred=window)], None)["pool"]
+    assert _hours(p, grid=True) == [9, 10, 11, 12, 13, 14, 15, 16]
+
+
+def test_partial_sun_lowers_the_price_of_an_hour() -> None:
+    # Before 14:00. 400 W of the pump's 530 W come from the surplus at 10:00: 75 % at the sell
+    # price makes it cheaper than 11:00-13:00.
+    p = plan(8 * H, _day({10: 400}), [_pump(1, deadline=14 * H)], None)["pool"]
+    [slot] = p.slots
+    assert int(slot.start // H) == 10 and slot.grid
+    covered = 400 / 530
+    assert slot.price == pytest.approx(covered * SELL[10] + (1 - covered) * BUY[10], abs=1e-5)
+
+
+def test_current_hour_counts_only_what_is_left() -> None:
+    p = plan(14.5 * H, _day(), [_pump(1)], None)["pool"]
+    # Half of 14:00 is left (the cheapest), then 15:00
+    assert [(int(s.start // H), s.hours) for s in p.slots] == [(14, 0.5), (15, 0.5)]
+
+
+def test_no_prices_uses_the_last_hours_before_the_deadline() -> None:
+    p = plan(8 * H, _day(prices=False), [_pump(2.5)], None)["pool"]
+    assert not p.priced and p.cost is None
+    assert [(int(s.start // H), s.hours) for s in p.slots] == [(14, 0.5), (15, 1), (16, 1)]
+
+
+def test_two_loads_never_exceed_the_contracted_power() -> None:
+    # Room for 1000 W of grid fill: the pump (530 W) and the radiator (600 W) cannot share an hour.
+    radiator = Request("radiator", 2, 600, 1, 17 * H)
+    plans = plan(8 * H, _day(), [_pump(1), radiator], 1000)
+    assert _hours(plans["pool"], grid=True) == [14]
+    assert _hours(plans["radiator"], grid=True) == [15]  # the next cheapest
+    # With room for both they share the cheapest hour
+    plans = plan(8 * H, _day(), [_pump(1), radiator], 1200)
+    assert _hours(plans["radiator"], grid=True) == [14]
+    # Unknown contracted power: one load per hour
+    plans = plan(8 * H, _day(), [_pump(1), radiator], None)
+    assert _hours(plans["radiator"], grid=True) == [15]
+
+
+def test_higher_priority_takes_the_surplus_first() -> None:
+    radiator = Request("radiator", 2, 600, 1, 17 * H)
+    plans = plan(8 * H, _day({12: 800}), [radiator, _pump(1)], None)
+    assert _hours(plans["pool"], grid=False) == [12]  # priority 1
+    assert _hours(plans["radiator"], grid=True) == [14]  # only 270 W left at 12:00
+
+
+def test_what_does_not_fit_before_the_deadline_is_short() -> None:
+    p = plan(15 * H, _day(), [_pump(3)], None)["pool"]
+    assert sum(s.hours for s in p.slots) == 2 and p.short_h == 1
+
+
+def test_objective_across_midnight() -> None:
+    # From 17:00 to 06:30 the next morning: the cheap hours after midnight are chosen.
+    slots = [Slot(h * H, (h + 1) * H, BUY[h % 24], SELL[h % 24], 0.0, estimated=h >= 24) for h in range(17, 31)]
+    p = plan(17 * H, slots, [_pump(3, deadline=30.5 * H)], None)["pool"]
+    assert _hours(p, grid=True) == [26, 28, 29]  # 02:00, 04:00 and 05:00 of the next day
+    assert all(slot.estimated for slot in p.slots)
+
+
+def test_surplus_profile_is_the_median_of_the_last_days() -> None:
+    profile = SurplusProfile()
+    assert profile.expected(12) == 0
+    for day, watts in enumerate([100, 2000, 1800, 1900]):
+        profile.add(f"2026-11-{day + 1:02d}", 12, watts)
+        profile.add(f"2026-11-{day + 1:02d}", 12, watts)
+    assert profile.expected(12) == 1850
+    profile.add("2026-11-02", 13, -300)  # an import counts as no surplus
+    assert profile.expected(13) == 0
+    for day in range(5, 5 + PROFILE_DAYS):
+        profile.add(f"2026-11-{day:02d}", 12, 500)
+    assert len(profile.days) == PROFILE_DAYS and profile.expected(12) == 500

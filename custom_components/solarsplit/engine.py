@@ -61,6 +61,9 @@ class Reason(StrEnum):
     WAITING_REQUEST = "waiting_request"  # an on-demand load nobody asked for: not eligible
     OUT_OF_SEASON = "out_of_season"  # the current season is not one of the load's
     SEASON_UNKNOWN = "season_unknown"  # the season entity is not usable: left as it is
+    GRID_FILL = "grid_fill"  # its minimum needs the grid: on in one of the cheapest hours planned
+    GRID_FILL_NO_PRICE = "grid_fill_no_price"  # same, without prices: in the last hours before the deadline
+    GRID_LIMIT = "grid_limit"  # grid fill would take the import over the contracted power less the margin
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,13 @@ class EngineConfig:
     on_margin: float = 100  # W, extra budget needed to switch a load on
     import_tolerance: float = 150  # W, deficit tolerated before switching a load off
     settle_time: float = 30  # s
+    grid_limit: float | None = None  # W of import grid fill may reach (contracted power less margin)
+    # A regulable load is saturated when it cannot take more: its output is at the top,
+    # or surplus is still exported while it draws well below its limit (a thermostat
+    # cut), for this long.
+    saturation_output: float = 99  # %
+    saturation_export: float = 150  # W
+    saturation_time: float = 60  # s
 
 
 @dataclass(frozen=True)
@@ -93,6 +103,7 @@ class Regulator:
     interval: float = 30  # s, minimum time between two writes
     written: float | None = None  # time of the last write
     lowered: bool = False  # SolarSplit set it below its maximum and has not restored it since
+    output: float | None = None  # % of its output in use (a diverter's duty); None: not known
 
 
 @dataclass(frozen=True)
@@ -139,6 +150,31 @@ class LoadState:
     # and nobody else has switched it off since).
     on_demand: bool = False
     request: bool = False
+    # Objective: minimum hours before a deadline. `min_pending` while it is not met and
+    # the deadline has not passed; `min_priority` replaces the priority meanwhile.
+    min_pending: bool = False
+    min_priority: int | None = None
+    # Urgency: while its entity is on, `urgency_priority` replaces every other priority.
+    urgent: bool = False
+    urgency_priority: int | None = None
+    # The plan buys this hour from the grid to meet the minimum (GRID_FILL or
+    # GRID_FILL_NO_PRICE); None otherwise. Only for relay loads.
+    grid_fill: Reason | None = None
+    saturated_since: float | None = None  # regulable: since when it cannot take more
+
+    @property
+    def effective_priority(self) -> int:
+        """Priority in this cycle: urgency first, then the one until the minimum, then the normal one."""
+        if self.urgent and self.urgency_priority is not None:
+            return self.urgency_priority
+        if self.min_pending and self.min_priority is not None:
+            return self.min_priority
+        return self.priority
+
+    @property
+    def filling(self) -> bool:
+        """Whether it is a relay load the plan fills from the grid now: its power is not surplus."""
+        return self.grid_fill is not None and self.kind is LoadKind.RELAY
 
     @property
     def consumption(self) -> float:
@@ -170,6 +206,7 @@ class LoadState:
                  or (self.in_season is False and self.regulator is not None))
             and (not self.on_demand or self.request or self.demand_off or self.season_off or self.shutdown)
             and (self.regulator is None or self.regulator.auto)
+            and not self.filling
         )
 
     @property
@@ -205,6 +242,8 @@ class Decision:
     limits: dict[str, float] = field(default_factory=dict)  # W, limit each regulable load should have
     writes: dict[str, float] = field(default_factory=dict)  # W, limits to write in this cycle
     target_reached: tuple[str, ...] = ()  # loads whose daily target is met
+    saturated_since: dict[str, float] = field(default_factory=dict)  # regulable loads that cannot take more
+    saturated: tuple[str, ...] = ()  # ...for the saturation time already
 
 
 def _since(previous: float | None, now: float) -> float:
@@ -275,7 +314,13 @@ def decide(
     gap = False  # an eligible relay load before this one was left off
     claimed = False  # a load before this one uses, or is about to use, part of the budget
 
-    for load in sorted(loads, key=lambda load: (load.priority, load.id)):
+    def order(load: LoadState) -> tuple[int, bool, int, str]:
+        # On a tie, an urgent load goes first.
+        return load.effective_priority, not (load.urgent and load.urgency_priority is not None), load.priority, load.id
+
+    saturated_since: dict[str, float] = {}
+    saturated: list[str] = []
+    for load in sorted(loads, key=order):
         if not load.managed:
             reasons[load.id] = Reason.UNMANAGED
             continue
@@ -335,7 +380,18 @@ def decide(
                 reasons[load.id] = Reason.LIMITED if limits[load.id] < reg.maximum else Reason.FULL_POWER
             else:
                 limits[load.id], reasons[load.id] = reg.maximum, Reason.FULL_POWER
-            remaining -= load.consumption
+            # Until it is saturated it claims what it could take up to its limit: a load
+            # behind it does not start with that. Saturated, only what it draws.
+            unused = meas.export_w - meas.import_w > cfg.saturation_export
+            if (reg.output is not None and reg.output >= cfg.saturation_output) or (
+                unused and load.consumption < reg.current - reg.threshold
+            ):
+                saturated_since[load.id] = _since(load.saturated_since, now)
+            if load.id in saturated_since and now - saturated_since[load.id] >= cfg.saturation_time:
+                saturated.append(load.id)
+                remaining -= load.consumption
+            else:
+                remaining -= max(load.consumption, min(max(remaining, 0.0), limits[load.id]))
             claimed = claimed or load.consumption > 0
             continue
         if not load.eligible:
@@ -345,6 +401,15 @@ def decide(
         if load.target_reached:
             desired[load.id] = False
             reasons[load.id] = Reason.TARGET_REACHED
+            continue
+        if load.filling:
+            # Deliberate, from the plan: no budget, no skipping rule. Its power is not in
+            # the budget, so it takes nothing from the loads behind it.
+            fill_w = 0.0 if load.is_on else load.nominal_w
+            if cfg.grid_limit is not None and meas.import_w + fill_w > cfg.grid_limit:
+                desired[load.id], reasons[load.id] = False, Reason.GRID_LIMIT
+            else:
+                desired[load.id], reasons[load.id] = True, load.grid_fill
             continue
         if gap and load.no_skip:
             desired[load.id] = False
@@ -369,12 +434,9 @@ def decide(
     reached = tuple(sorted(i for i, reason in reasons.items() if reason is Reason.TARGET_REACHED))
     offs = sorted(
         (by_id[i] for i, on in desired.items() if not on and by_id[i].is_on),
-        key=lambda load: (-load.priority, load.id),
+        key=lambda load: (-load.effective_priority, load.id),
     )
-    ons = sorted(
-        (by_id[i] for i, on in desired.items() if on and not by_id[i].is_on),
-        key=lambda load: (load.priority, load.id),
-    )
+    ons = sorted((by_id[i] for i, on in desired.items() if on and not by_id[i].is_on), key=order)
     # A load missing from these dicts does not meet the condition: its mark resets.
     on_since = {load.id: _since(load.on_since, now) for load in ons}
     off_since = {load.id: _since(load.off_since, now) for load in offs}
@@ -383,7 +445,7 @@ def decide(
                reason: Reason = Reason.STEADY) -> Decision:
         return Decision(
             budget, action, load_id, reason, desired, reasons, on_since, off_since,
-            limits, _limit_writes(now, loads, limits), reached,
+            limits, _limit_writes(now, loads, limits), reached, saturated_since, tuple(sorted(saturated)),
         )
 
     if not offs and not ons:
@@ -401,7 +463,7 @@ def decide(
                 continue
             # A global shutdown or the end of the season is deliberate, not a passing
             # cloud: no off delay, but the minimum on time still protects compressors.
-            deliberate = load.shutdown or load.season_off
+            deliberate = load.shutdown or load.season_off or reasons[load.id] is Reason.GRID_LIMIT
             if not deliberate and now - off_since[load.id] < load.off_delay:
                 reasons[load.id] = Reason.OFF_DELAY
                 continue
@@ -409,7 +471,7 @@ def decide(
             if since < load.min_off:
                 reasons[load.id] = Reason.MIN_OFF_TIME
                 continue
-            if now - on_since[load.id] < load.on_delay:
+            if load.grid_fill is None and now - on_since[load.id] < load.on_delay:
                 reasons[load.id] = Reason.ON_DELAY
                 continue
         return result(action, load.id, reasons[load.id])

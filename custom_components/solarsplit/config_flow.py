@@ -21,12 +21,18 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
+    CONF_BUY_PRICE_SENSOR,
     CONF_CIRCUIT_SENSOR,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
+    CONF_CONTRACTED_POWER,
     CONF_CYCLE_INTERVAL,
+    CONF_DAY_START,
+    CONF_DEADLINE,
+    CONF_DEADLINE_ENTITY,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_GRID_MARGIN,
     CONF_GRID_SENSOR,
     CONF_GRID_SIGN,
     CONF_HOURS_SENSOR,
@@ -41,8 +47,11 @@ from .const import (
     CONF_LOAD_ENTITY,
     CONF_LOAD_TYPE,
     CONF_MANAGE_AT,
+    CONF_MIN_ENTITY,
+    CONF_MIN_HOURS,
     CONF_MIN_OFF,
     CONF_MIN_ON,
+    CONF_MIN_PRIORITY,
     CONF_MODE_ENTITY,
     CONF_NO_SKIP,
     CONF_NOMINAL_POWER,
@@ -50,6 +59,7 @@ from .const import (
     CONF_ON_DELAY,
     CONF_ON_DEMAND,
     CONF_ON_MARGIN,
+    CONF_OUTPUT_ENTITY,
     CONF_POWER_SENSOR,
     CONF_PRIORITY,
     CONF_PV_SENSOR,
@@ -58,14 +68,20 @@ from .const import (
     CONF_SAFETY_MARGIN,
     CONF_SEASON_ENTITY,
     CONF_SEASONS,
+    CONF_SELL_PRICE_SENSOR,
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
     CONF_STALE_TIMEOUT,
     CONF_TARGET_ENTITY,
     CONF_TARGET_HOURS,
+    CONF_URGENCY_ENTITY,
+    CONF_URGENCY_PRIORITY,
     CONF_VARIABLE_ENTITY,
+    CONF_WINDOW_END,
+    CONF_WINDOW_START,
     CONF_ZERO_INJECTION_ENTITY,
+    DEADLINE_DOMAINS,
     DOMAIN,
     GRID_SIGNS,
     HVAC_MODES,
@@ -74,11 +90,13 @@ from .const import (
     LOAD_TYPES,
     MAX_CYCLE_INTERVAL,
     MIN_CYCLE_INTERVAL,
+    PRICE_DOMAINS,
     SEASON_DOMAINS,
     SECTION_CONTROL,
     SECTION_DAILY_TARGET,
     SECTION_REGULABLE,
     SUBENTRY_LOAD,
+    URGENCY_DOMAINS,
 )
 from .settings import DEFAULTS, LOAD_DEFAULTS, get_settings
 
@@ -101,10 +119,15 @@ HOURS = selector.NumberSelector(
     )
 )
 SEASON_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=SEASON_DOMAINS))
+OUTPUT_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=["sensor", "number"]))
+PRICE_SENSOR = selector.EntitySelector(selector.EntitySelectorConfig(domain=PRICE_DOMAINS))
+URGENCY_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=URGENCY_DOMAINS))
+DEADLINE_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=DEADLINE_DOMAINS))
 SECTIONS = (SECTION_REGULABLE, SECTION_DAILY_TARGET, SECTION_CONTROL)
 OPTIONAL_ENTITIES = (
     CONF_GRID_SENSOR, CONF_EXPORT_SENSOR, CONF_IMPORT_SENSOR,
     CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION, CONF_SEASON_ENTITY,
+    CONF_BUY_PRICE_SENSOR, CONF_SELL_PRICE_SENSOR,
 )
 
 
@@ -136,6 +159,12 @@ def settings_schema(values: dict[str, Any]) -> vol.Schema:
             _optional(CONF_ZERO_INJECTION_ENTITY, values): BOOLEAN_ENTITY,
             _optional(CONF_GLOBAL_CONDITION, values): BOOLEAN_ENTITY,
             _optional(CONF_SEASON_ENTITY, values): SEASON_ENTITY,
+            _optional(CONF_BUY_PRICE_SENSOR, values): PRICE_SENSOR,
+            _optional(CONF_SELL_PRICE_SENSOR, values): PRICE_SENSOR,
+            vol.Required(CONF_CONTRACTED_POWER, default=values[CONF_CONTRACTED_POWER]): _number(
+                0, 100000, UnitOfPower.WATT
+            ),
+            vol.Required(CONF_GRID_MARGIN, default=values[CONF_GRID_MARGIN]): _number(0, 20000, UnitOfPower.WATT),
             vol.Required(CONF_CYCLE_INTERVAL, default=values[CONF_CYCLE_INTERVAL]): _number(
                 MIN_CYCLE_INTERVAL, MAX_CYCLE_INTERVAL, UnitOfTime.SECONDS
             ),
@@ -187,19 +216,30 @@ def load_schema(values: dict[str, Any], seasons: list[str] | None = None) -> vol
             required(CONF_LIMIT_MAX): _number(0, 20000, UnitOfPower.WATT),
             required(CONF_LIMIT_THRESHOLD): _number(0, 2000, UnitOfPower.WATT),
             required(CONF_LIMIT_INTERVAL): _number(0, 3600, UnitOfTime.SECONDS),
+            _optional(CONF_OUTPUT_ENTITY, values): OUTPUT_ENTITY,
         }
     )
     daily_target = vol.Schema(
         {
-            _optional(CONF_HOURS_SENSOR, values): HOURS_SENSOR,
-            _optional(CONF_TARGET_ENTITY, values): TARGET_ENTITY,
+            required(CONF_MIN_HOURS): HOURS,
+            _optional(CONF_MIN_ENTITY, values): TARGET_ENTITY,
             required(CONF_TARGET_HOURS): HOURS,
+            _optional(CONF_TARGET_ENTITY, values): TARGET_ENTITY,
+            required(CONF_DAY_START): selector.TimeSelector(),
+            _optional(CONF_DEADLINE, values): selector.TimeSelector(),
+            _optional(CONF_DEADLINE_ENTITY, values): DEADLINE_ENTITY,
+            required(CONF_MIN_PRIORITY): _number(0, 100),
+            _optional(CONF_WINDOW_START, values): selector.TimeSelector(),
+            _optional(CONF_WINDOW_END, values): selector.TimeSelector(),
+            _optional(CONF_HOURS_SENSOR, values): HOURS_SENSOR,
         }
     )
     control: dict[Any, Any] = {
         required(CONF_ON_DEMAND): selector.BooleanSelector(),
         required(CONF_AUTO_MANAGE): selector.BooleanSelector(),
         required(CONF_MANAGE_AT): selector.TimeSelector(),
+        _optional(CONF_URGENCY_ENTITY, values): URGENCY_ENTITY,
+        required(CONF_URGENCY_PRIORITY): _number(1, 100),
     }
     if seasons is not None:
         stored = [season for season in values[CONF_SEASONS] if season not in seasons]
@@ -208,7 +248,12 @@ def load_schema(values: dict[str, Any], seasons: list[str] | None = None) -> vol
                 options=[*seasons, *stored], multiple=True, mode=selector.SelectSelectorMode.LIST
             )
         )
-    control_set = values[CONF_ON_DEMAND] or values[CONF_AUTO_MANAGE] or values[CONF_SEASONS]
+    control_set = (
+        values[CONF_ON_DEMAND] or values[CONF_AUTO_MANAGE] or values[CONF_SEASONS] or values[CONF_URGENCY_ENTITY]
+    )
+    objective_set = any(
+        values[key] for key in (CONF_TARGET_ENTITY, CONF_TARGET_HOURS, CONF_MIN_HOURS, CONF_MIN_ENTITY)
+    )
     return vol.Schema(
         {
             required(CONF_NAME): selector.TextSelector(),
@@ -238,7 +283,7 @@ def load_schema(values: dict[str, Any], seasons: list[str] | None = None) -> vol
                 regulable, {"collapsed": values[CONF_LOAD_TYPE] != LOAD_TYPE_REGULABLE}
             ),
             vol.Required(SECTION_DAILY_TARGET): section(
-                daily_target, {"collapsed": not (values[CONF_TARGET_ENTITY] or values[CONF_TARGET_HOURS])}
+                daily_target, {"collapsed": not objective_set}
             ),
         }
     )
@@ -351,4 +396,8 @@ class LoadSubentryFlow(ConfigSubentryFlow):
                 return {"base": "regulable_incomplete"}
             if data[CONF_LIMIT_MIN] >= data[CONF_LIMIT_MAX]:
                 return {"base": "limit_range"}
+            if data.get(CONF_MIN_HOURS) or data.get(CONF_MIN_ENTITY):
+                return {"base": "minimum_relay_only"}
+        if bool(data.get(CONF_WINDOW_START)) != bool(data.get(CONF_WINDOW_END)):
+            return {"base": "window_incomplete"}
         return {}

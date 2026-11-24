@@ -23,7 +23,11 @@
           "stale_timeout": "Tiempo de datos congelados",
           "grid_sensor": "Sensor de potencia de red con signo",
           "grid_sign": "Signo del sensor de red",
-          "season_entity": "Entidad de temporada"
+          "season_entity": "Entidad de temporada",
+          "buy_price_sensor": "Sensor de precio de compra",
+          "sell_price_sensor": "Sensor de precio de venta",
+          "contracted_power": "Potencia contratada",
+          "grid_margin": "Margen del llenado con red"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -41,7 +45,11 @@
           "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación.",
           "grid_sensor": "Un solo sensor con la potencia de red, exportación e importación con signos opuestos. Usa este o los dos sensores de exportación e importación. Con un solo sensor, una lectura que no se informa en el tiempo de datos congelados es desconocida.",
           "grid_sign": "Solo para el sensor de red con signo: si la exportación es negativa o positiva.",
-          "season_entity": "Opcional. input_select o select con la temporada actual. Las cargas pueden limitarse a algunas de sus opciones."
+          "season_entity": "Opcional. input_select o select con la temporada actual. Las cargas pueden limitarse a algunas de sus opciones.",
+          "buy_price_sensor": "Precio de la energía comprada, en €/kWh, con los atributos price_00h…price_23h (por ejemplo el sensor PVPC de la integración ESIOS). Los precios de mañana se leen de price_next_day_00h… cuando se publican; hasta entonces se estima con la misma hora de hoy. Vacío: sin precios, y el llenado con red usa las últimas horas antes de cada hora límite.",
+          "sell_price_sensor": "Precio de la energía exportada, en €/kWh, con los mismos atributos. Una hora con excedente esperado cuesta este precio; vacío: no cuesta nada.",
+          "contracted_power": "Potencia que se puede tomar de la red. Las cargas que completan su mínimo con red nunca llevan la importación por encima de esta potencia menos el margen, ni en el plan ni en vivo. 0: desconocida, solo una carga a la vez completa con red.",
+          "grid_margin": "Potencia que se reserva por debajo de la contratada para el resto de la casa mientras hay cargas completando con red."
         }
       }
     },
@@ -69,7 +77,11 @@
           "stale_timeout": "Tiempo de datos congelados",
           "grid_sensor": "Sensor de potencia de red con signo",
           "grid_sign": "Signo del sensor de red",
-          "season_entity": "Entidad de temporada"
+          "season_entity": "Entidad de temporada",
+          "buy_price_sensor": "Sensor de precio de compra",
+          "sell_price_sensor": "Sensor de precio de venta",
+          "contracted_power": "Potencia contratada",
+          "grid_margin": "Margen del llenado con red"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -87,7 +99,11 @@
           "stale_timeout": "Una lectura de red distinta de cero que no se informa durante más de este tiempo, o ambos sensores de red sin informar, cuenta como desconocida y el bucle no decide. 0 desactiva la comprobación.",
           "grid_sensor": "Un solo sensor con la potencia de red, exportación e importación con signos opuestos. Usa este o los dos sensores de exportación e importación. Con un solo sensor, una lectura que no se informa en el tiempo de datos congelados es desconocida.",
           "grid_sign": "Solo para el sensor de red con signo: si la exportación es negativa o positiva.",
-          "season_entity": "Opcional. input_select o select con la temporada actual. Las cargas pueden limitarse a algunas de sus opciones."
+          "season_entity": "Opcional. input_select o select con la temporada actual. Las cargas pueden limitarse a algunas de sus opciones.",
+          "buy_price_sensor": "Precio de la energía comprada, en €/kWh, con los atributos price_00h…price_23h (por ejemplo el sensor PVPC de la integración ESIOS). Los precios de mañana se leen de price_next_day_00h… cuando se publican; hasta entonces se estima con la misma hora de hoy. Vacío: sin precios, y el llenado con red usa las últimas horas antes de cada hora límite.",
+          "sell_price_sensor": "Precio de la energía exportada, en €/kWh, con los mismos atributos. Una hora con excedente esperado cuesta este precio; vacío: no cuesta nada.",
+          "contracted_power": "Potencia que se puede tomar de la red. Las cargas que completan su mínimo con red nunca llevan la importación por encima de esta potencia menos el margen, ni en el plan ni en vivo. 0: desconocida, solo una carga a la vez completa con red.",
+          "grid_margin": "Potencia que se reserva por debajo de la contratada para el resto de la casa mientras hay cargas completando con red."
         }
       }
     },
@@ -146,24 +162,28 @@
           },
           "sections": {
             "control": {
-              "name": "Control manual y temporada",
-              "description": "Bajo demanda, vuelta automática a la gestión y temporadas en que se usa la carga.",
+              "name": "Control manual, temporada y urgencia",
+              "description": "Bajo demanda, vuelta automática a la gestión, temporadas en que se usa la carga y urgencia.",
               "data": {
                 "on_demand": "Solo bajo demanda",
                 "auto_manage": "Volver a gestionar automáticamente",
                 "manage_at": "Volver a gestionar a las",
-                "seasons": "Temporadas"
+                "seasons": "Temporadas",
+                "urgency_entity": "Entidad de urgencia",
+                "urgency_priority": "Prioridad de urgencia"
               },
               "data_description": {
                 "on_demand": "La carga solo se usa mientras alguien la pide: encenderla desde fuera (una persona, una automatización, un mando) abre una petición, y apagarla desde fuera la cierra. Durante la petición SolarSplit la apaga si falta excedente y la vuelve a encender cuando vuelve; un climatizador recupera el modo, la temperatura y el ventilador que se pusieron. SolarSplit nunca la enciende sin petición. Sustituye a Respetar cambios manuales.",
                 "auto_manage": "Cuando se apaga Gestionar, se vuelve a encender solo cuando la carga se apaga, o a la hora de abajo.",
                 "manage_at": "Hora local a la que Gestionar se vuelve a encender.",
-                "seasons": "La carga solo se usa en estas temporadas de la entidad de temporada (ajustes globales). Vacío: todo el año. Fuera de temporada no se usa, y SolarSplit la apaga si la encendió él."
+                "seasons": "La carga solo se usa en estas temporadas de la entidad de temporada (ajustes globales). Vacío: todo el año. Fuera de temporada no se usa, y SolarSplit la apaga si la encendió él.",
+                "urgency_entity": "Sensor binario, input boolean o interruptor. Mientras está encendida, la carga usa la prioridad de urgencia en lugar de la normal o la de hasta el mínimo: por ejemplo un termo que pasa primero cuando su plan está en riesgo. Desconocida: sin urgencia.",
+                "urgency_priority": "Prioridad mientras la entidad de urgencia está encendida (1 = primero). Con empate, va primero la carga urgente."
               }
             },
             "regulable": {
               "name": "Carga regulable",
-              "description": "Solo para el tipo Regulable. Mientras la entidad de modo tiene el valor automático, el consumo de la carga es excedente: SolarSplit lo cuenta y escribe en la entidad de límite lo que dejan las cargas que van antes (su máximo si no hay ninguna). En cualquier otro modo su consumo es de red y la carga se muestra como externa.",
+              "description": "Solo para el tipo Regulable. Mientras la entidad de modo tiene el valor automático, el consumo de la carga es excedente: SolarSplit lo cuenta y escribe en la entidad de límite lo que dejan las cargas que van antes (su máximo si no hay ninguna). Mientras no esté saturada se reserva lo que podría absorber hasta su límite, así que una carga de detrás no arranca con eso. En cualquier otro modo su consumo es de red y la carga se muestra como externa.",
               "data": {
                 "limit_entity": "Entidad de límite",
                 "mode_entity": "Entidad de modo",
@@ -171,7 +191,8 @@
                 "limit_min": "Límite mínimo",
                 "limit_max": "Límite máximo",
                 "limit_threshold": "Cambio mínimo que se escribe",
-                "limit_interval": "Tiempo mínimo entre escrituras"
+                "limit_interval": "Tiempo mínimo entre escrituras",
+                "output_entity": "Entidad de salida"
               },
               "data_description": {
                 "limit_entity": "Entidad numérica con la potencia máxima del dispositivo, por ejemplo la potencia máxima del derivador.",
@@ -180,21 +201,38 @@
                 "limit_min": "SolarSplit nunca escribe menos.",
                 "limit_max": "SolarSplit nunca escribe más, y lo vuelve a escribir cuando deja de limitar la carga.",
                 "limit_threshold": "Un límite nuevo solo se escribe si cambia al menos esto, o si llega al mínimo o al máximo.",
-                "limit_interval": "Para no saturar el dispositivo con escrituras."
+                "limit_interval": "Para no saturar el dispositivo con escrituras.",
+                "output_entity": "Sensor o número opcional con la salida del dispositivo en % (por ejemplo la consigna del derivador). Con 99 % o más durante un minuto la carga está saturada: no puede absorber más, y el excedente que deja pasa a las cargas de detrás. Sin ella, está saturada la carga que consume muy por debajo de su límite mientras se sigue exportando excedente durante un minuto (un corte del termostato)."
               }
             },
             "daily_target": {
               "name": "Objetivo diario",
-              "description": "Horas que debe funcionar la carga cada día. Al cumplirlas, la carga deja de ser elegible hasta el día siguiente: se apaga (tras su tiempo mínimo encendida) y no vuelve a encenderse.",
+              "description": "Horas que debe funcionar la carga cada día: un mínimo garantizado antes de una hora límite (solo cargas de relé) y un máximo opcional que solo se usa con excedente. El día empieza a la hora de inicio. Si el excedente esperado no basta para el mínimo, SolarSplit planifica las horas más baratas antes de la hora límite y en ellas enciende la carga con red (llenado con red). Al llegar al máximo la carga no se usa hasta el día siguiente.",
               "data": {
-                "hours_sensor": "Sensor de horas hoy",
-                "target_entity": "Entidad de horas objetivo",
-                "target_hours": "Horas objetivo"
+                "min_hours": "Horas mínimas",
+                "min_entity": "Entidad de horas mínimas",
+                "target_hours": "Horas máximas",
+                "target_entity": "Entidad de horas máximas",
+                "day_start": "Inicio del día",
+                "deadline": "Hora límite",
+                "deadline_entity": "Entidad de hora límite",
+                "min_priority": "Prioridad hasta el mínimo",
+                "window_start": "Ventana preferente desde",
+                "window_end": "Ventana preferente hasta",
+                "hours_sensor": "Sensor de horas hechas"
               },
               "data_description": {
-                "hours_sensor": "Sensor con las horas que lleva encendida hoy, por ejemplo uno de estadísticas del historial. Vacío: la cuenta propia de SolarSplit (el sensor Tiempo encendida hoy de la carga).",
-                "target_entity": "Input number o sensor con las horas que se quieren hoy. Tiene prioridad sobre el valor fijo.",
-                "target_hours": "Horas fijas al día, si no hay entidad de objetivo. 0: sin objetivo diario."
+                "min_hours": "Horas garantizadas antes de la hora límite, con red si el excedente no basta. 0: sin mínimo. Solo cargas de relé.",
+                "min_entity": "Input number, number o sensor con las horas mínimas. Tiene prioridad sobre el valor fijo.",
+                "target_hours": "Horas al día, solo con excedente, si no hay entidad de máximo. Al llegar, la carga no se usa hasta el día siguiente. 0: sin máximo.",
+                "target_entity": "Input number, number o sensor con las horas máximas. Tiene prioridad sobre el valor fijo.",
+                "day_start": "Hora local a la que empieza el día del objetivo y sus horas vuelven a cero. Por ejemplo 17:00 con hora límite 09:00 aprovecha la madrugada.",
+                "deadline": "Hora local a la que el mínimo debe estar cumplido. Vacío: el final del día del objetivo.",
+                "deadline_entity": "Input datetime, time o sensor de fecha y hora con la hora límite, para que la publique otra integración. Tiene prioridad sobre el valor fijo.",
+                "min_priority": "Prioridad mientras el mínimo no está cumplido antes de la hora límite; después, la normal. 0: siempre la normal.",
+                "window_start": "El llenado con red usa primero las horas de esta ventana (por ejemplo desde las 10:00 para aprovechar el sol parcial y los precios bajos de mediodía), y otras solo si no bastan.",
+                "window_end": "Final de la ventana preferente. Las dos o ninguna.",
+                "hours_sensor": "Sensor con las horas encendida en el día del objetivo, por ejemplo uno de estadísticas del historial. Vacío: la cuenta propia de SolarSplit desde el inicio del día."
               }
             }
           }
@@ -243,24 +281,28 @@
           },
           "sections": {
             "control": {
-              "name": "Control manual y temporada",
-              "description": "Bajo demanda, vuelta automática a la gestión y temporadas en que se usa la carga.",
+              "name": "Control manual, temporada y urgencia",
+              "description": "Bajo demanda, vuelta automática a la gestión, temporadas en que se usa la carga y urgencia.",
               "data": {
                 "on_demand": "Solo bajo demanda",
                 "auto_manage": "Volver a gestionar automáticamente",
                 "manage_at": "Volver a gestionar a las",
-                "seasons": "Temporadas"
+                "seasons": "Temporadas",
+                "urgency_entity": "Entidad de urgencia",
+                "urgency_priority": "Prioridad de urgencia"
               },
               "data_description": {
                 "on_demand": "La carga solo se usa mientras alguien la pide: encenderla desde fuera (una persona, una automatización, un mando) abre una petición, y apagarla desde fuera la cierra. Durante la petición SolarSplit la apaga si falta excedente y la vuelve a encender cuando vuelve; un climatizador recupera el modo, la temperatura y el ventilador que se pusieron. SolarSplit nunca la enciende sin petición. Sustituye a Respetar cambios manuales.",
                 "auto_manage": "Cuando se apaga Gestionar, se vuelve a encender solo cuando la carga se apaga, o a la hora de abajo.",
                 "manage_at": "Hora local a la que Gestionar se vuelve a encender.",
-                "seasons": "La carga solo se usa en estas temporadas de la entidad de temporada (ajustes globales). Vacío: todo el año. Fuera de temporada no se usa, y SolarSplit la apaga si la encendió él."
+                "seasons": "La carga solo se usa en estas temporadas de la entidad de temporada (ajustes globales). Vacío: todo el año. Fuera de temporada no se usa, y SolarSplit la apaga si la encendió él.",
+                "urgency_entity": "Sensor binario, input boolean o interruptor. Mientras está encendida, la carga usa la prioridad de urgencia en lugar de la normal o la de hasta el mínimo: por ejemplo un termo que pasa primero cuando su plan está en riesgo. Desconocida: sin urgencia.",
+                "urgency_priority": "Prioridad mientras la entidad de urgencia está encendida (1 = primero). Con empate, va primero la carga urgente."
               }
             },
             "regulable": {
               "name": "Carga regulable",
-              "description": "Solo para el tipo Regulable. Mientras la entidad de modo tiene el valor automático, el consumo de la carga es excedente: SolarSplit lo cuenta y escribe en la entidad de límite lo que dejan las cargas que van antes (su máximo si no hay ninguna). En cualquier otro modo su consumo es de red y la carga se muestra como externa.",
+              "description": "Solo para el tipo Regulable. Mientras la entidad de modo tiene el valor automático, el consumo de la carga es excedente: SolarSplit lo cuenta y escribe en la entidad de límite lo que dejan las cargas que van antes (su máximo si no hay ninguna). Mientras no esté saturada se reserva lo que podría absorber hasta su límite, así que una carga de detrás no arranca con eso. En cualquier otro modo su consumo es de red y la carga se muestra como externa.",
               "data": {
                 "limit_entity": "Entidad de límite",
                 "mode_entity": "Entidad de modo",
@@ -268,7 +310,8 @@
                 "limit_min": "Límite mínimo",
                 "limit_max": "Límite máximo",
                 "limit_threshold": "Cambio mínimo que se escribe",
-                "limit_interval": "Tiempo mínimo entre escrituras"
+                "limit_interval": "Tiempo mínimo entre escrituras",
+                "output_entity": "Entidad de salida"
               },
               "data_description": {
                 "limit_entity": "Entidad numérica con la potencia máxima del dispositivo, por ejemplo la potencia máxima del derivador.",
@@ -277,21 +320,38 @@
                 "limit_min": "SolarSplit nunca escribe menos.",
                 "limit_max": "SolarSplit nunca escribe más, y lo vuelve a escribir cuando deja de limitar la carga.",
                 "limit_threshold": "Un límite nuevo solo se escribe si cambia al menos esto, o si llega al mínimo o al máximo.",
-                "limit_interval": "Para no saturar el dispositivo con escrituras."
+                "limit_interval": "Para no saturar el dispositivo con escrituras.",
+                "output_entity": "Sensor o número opcional con la salida del dispositivo en % (por ejemplo la consigna del derivador). Con 99 % o más durante un minuto la carga está saturada: no puede absorber más, y el excedente que deja pasa a las cargas de detrás. Sin ella, está saturada la carga que consume muy por debajo de su límite mientras se sigue exportando excedente durante un minuto (un corte del termostato)."
               }
             },
             "daily_target": {
               "name": "Objetivo diario",
-              "description": "Horas que debe funcionar la carga cada día. Al cumplirlas, la carga deja de ser elegible hasta el día siguiente: se apaga (tras su tiempo mínimo encendida) y no vuelve a encenderse.",
+              "description": "Horas que debe funcionar la carga cada día: un mínimo garantizado antes de una hora límite (solo cargas de relé) y un máximo opcional que solo se usa con excedente. El día empieza a la hora de inicio. Si el excedente esperado no basta para el mínimo, SolarSplit planifica las horas más baratas antes de la hora límite y en ellas enciende la carga con red (llenado con red). Al llegar al máximo la carga no se usa hasta el día siguiente.",
               "data": {
-                "hours_sensor": "Sensor de horas hoy",
-                "target_entity": "Entidad de horas objetivo",
-                "target_hours": "Horas objetivo"
+                "min_hours": "Horas mínimas",
+                "min_entity": "Entidad de horas mínimas",
+                "target_hours": "Horas máximas",
+                "target_entity": "Entidad de horas máximas",
+                "day_start": "Inicio del día",
+                "deadline": "Hora límite",
+                "deadline_entity": "Entidad de hora límite",
+                "min_priority": "Prioridad hasta el mínimo",
+                "window_start": "Ventana preferente desde",
+                "window_end": "Ventana preferente hasta",
+                "hours_sensor": "Sensor de horas hechas"
               },
               "data_description": {
-                "hours_sensor": "Sensor con las horas que lleva encendida hoy, por ejemplo uno de estadísticas del historial. Vacío: la cuenta propia de SolarSplit (el sensor Tiempo encendida hoy de la carga).",
-                "target_entity": "Input number o sensor con las horas que se quieren hoy. Tiene prioridad sobre el valor fijo.",
-                "target_hours": "Horas fijas al día, si no hay entidad de objetivo. 0: sin objetivo diario."
+                "min_hours": "Horas garantizadas antes de la hora límite, con red si el excedente no basta. 0: sin mínimo. Solo cargas de relé.",
+                "min_entity": "Input number, number o sensor con las horas mínimas. Tiene prioridad sobre el valor fijo.",
+                "target_hours": "Horas al día, solo con excedente, si no hay entidad de máximo. Al llegar, la carga no se usa hasta el día siguiente. 0: sin máximo.",
+                "target_entity": "Input number, number o sensor con las horas máximas. Tiene prioridad sobre el valor fijo.",
+                "day_start": "Hora local a la que empieza el día del objetivo y sus horas vuelven a cero. Por ejemplo 17:00 con hora límite 09:00 aprovecha la madrugada.",
+                "deadline": "Hora local a la que el mínimo debe estar cumplido. Vacío: el final del día del objetivo.",
+                "deadline_entity": "Input datetime, time o sensor de fecha y hora con la hora límite, para que la publique otra integración. Tiene prioridad sobre el valor fijo.",
+                "min_priority": "Prioridad mientras el mínimo no está cumplido antes de la hora límite; después, la normal. 0: siempre la normal.",
+                "window_start": "El llenado con red usa primero las horas de esta ventana (por ejemplo desde las 10:00 para aprovechar el sol parcial y los precios bajos de mediodía), y otras solo si no bastan.",
+                "window_end": "Final de la ventana preferente. Las dos o ninguna.",
+                "hours_sensor": "Sensor con las horas encendida en el día del objetivo, por ejemplo uno de estadísticas del historial. Vacío: la cuenta propia de SolarSplit desde el inicio del día."
               }
             }
           }
@@ -300,7 +360,9 @@
       "error": {
         "entity_in_use": "Esta entidad ya pertenece a otra carga.",
         "regulable_incomplete": "Una carga regulable necesita un sensor de potencia, una entidad de límite y una entidad de modo.",
-        "limit_range": "El límite mínimo debe ser menor que el máximo."
+        "limit_range": "El límite mínimo debe ser menor que el máximo.",
+        "minimum_relay_only": "Un mínimo con hora límite es solo para cargas de relé: una carga regulable nunca se conmuta.",
+        "window_incomplete": "La ventana preferente necesita inicio y final."
       }
     }
   },
@@ -386,7 +448,10 @@
               "target_reached": "Objetivo diario cumplido",
               "waiting_request": "Esperando una petición",
               "out_of_season": "Fuera de temporada",
-              "season_unknown": "Temporada desconocida"
+              "season_unknown": "Temporada desconocida",
+              "grid_fill": "Completando el mínimo con red (horas más baratas)",
+              "grid_fill_no_price": "Completando el mínimo con red (sin precios: últimas horas)",
+              "grid_limit": "El llenado con red superaría la potencia contratada"
             }
           },
           "budget": {
@@ -415,6 +480,12 @@
           },
           "limit": {
             "name": "Límite de potencia"
+          },
+          "effective_priority": {
+            "name": "Prioridad efectiva"
+          },
+          "saturated": {
+            "name": "Saturada"
           }
         }
       },
@@ -449,7 +520,10 @@
           "target_reached": "Objetivo diario cumplido",
           "waiting_request": "Esperando una petición",
           "out_of_season": "Fuera de temporada",
-          "season_unknown": "Temporada desconocida"
+          "season_unknown": "Temporada desconocida",
+          "grid_fill": "Completando el mínimo con red (horas más baratas)",
+          "grid_fill_no_price": "Completando el mínimo con red (sin precios: últimas horas)",
+          "grid_limit": "El llenado con red superaría la potencia contratada"
         }
       },
       "on_today": {
@@ -466,6 +540,46 @@
           },
           "in_use": {
             "name": "En uso"
+          }
+        }
+      },
+      "objective_pending": {
+        "name": "Horas pendientes",
+        "state_attributes": {
+          "done": {
+            "name": "Horas hechas"
+          },
+          "minimum": {
+            "name": "Mínimo"
+          },
+          "maximum": {
+            "name": "Máximo"
+          },
+          "day_start": {
+            "name": "Inicio del día"
+          }
+        }
+      },
+      "objective_deadline": {
+        "name": "Hora límite"
+      },
+      "objective_cost": {
+        "name": "Coste estimado",
+        "state_attributes": {
+          "plan": {
+            "name": "Plan"
+          },
+          "grid_hours": {
+            "name": "Horas con red"
+          },
+          "grid_kwh": {
+            "name": "Energía con red"
+          },
+          "short_hours": {
+            "name": "Horas que no caben"
+          },
+          "priced": {
+            "name": "Con precios"
           }
         }
       }

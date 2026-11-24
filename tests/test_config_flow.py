@@ -391,3 +391,45 @@ async def test_options_set_and_clear_the_season_entity(hass: HomeAssistant) -> N
     result = await hass.config_entries.options.async_configure(result["flow_id"], SENSORS)
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert get_settings(entry)[CONF_SEASON_ENTITY] is None  # cleared
+
+
+async def test_add_load_with_a_minimum_and_urgency(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    objective = {
+        "min_hours": 4, "day_start": "17:00:00", "deadline": "09:00:00", "min_priority": 1,
+        "window_start": "10:00:00", "window_end": "17:00:00",
+    }
+    control = {"urgency_entity": "binary_sensor.tankwise_plan_at_risk", "urgency_priority": 1}
+    result = await _add_load(hass, entry, {**LOAD, SECTION_DAILY_TARGET: objective, "control": control})
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    (subentry,) = entry.subentries.values()
+    settings = load_settings(subentry)
+    assert (settings["min_hours"], settings["deadline"], settings["day_start"]) == (4, "09:00:00", "17:00:00")
+    assert settings["urgency_entity"] == "binary_sensor.tankwise_plan_at_risk"
+    # Editing it keeps everything; clearing the window removes it
+    result = await _reconfigure(hass, entry, subentry.subentry_id, {
+        SECTION_DAILY_TARGET: {"window_start": None, "window_end": None},
+    })
+    assert result["reason"] == "reconfigure_successful"
+    settings = load_settings(entry.subentries[subentry.subentry_id])
+    assert settings["window_start"] is None and settings["min_hours"] == 4
+    assert settings["urgency_entity"] == "binary_sensor.tankwise_plan_at_risk"
+
+
+async def test_minimum_and_window_are_validated(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    result = await _add_load(hass, entry, {**TERMO, SECTION_REGULABLE: REGULABLE, SECTION_DAILY_TARGET: {"min_hours": 2}})
+    assert result["errors"] == {"base": "minimum_relay_only"}
+    result = await _add_load(hass, entry, {**LOAD, SECTION_DAILY_TARGET: {"window_start": "10:00:00"}})
+    assert result["errors"] == {"base": "window_incomplete"}
+
+
+async def test_options_set_the_prices_and_the_contracted_power(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    changes = {"buy_price_sensor": "sensor.pvpc", "contracted_power": 9200, "grid_margin": 1000}
+    result = await hass.config_entries.options.async_configure(result["flow_id"], _submit(result, changes))
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    settings = get_settings(entry)
+    assert settings["buy_price_sensor"] == "sensor.pvpc" and settings["sell_price_sensor"] is None
+    assert entry.runtime_data.grid_cap == 8200

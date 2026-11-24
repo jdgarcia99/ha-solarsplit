@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import asdict, dataclass, field, replace
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
@@ -23,12 +23,18 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
+    CONF_BUY_PRICE_SENSOR,
     CONF_CIRCUIT_SENSOR,
     CONF_CONDITION_ENTITY,
     CONF_CONDITION_STATE,
+    CONF_CONTRACTED_POWER,
     CONF_CYCLE_INTERVAL,
+    CONF_DAY_START,
+    CONF_DEADLINE,
+    CONF_DEADLINE_ENTITY,
     CONF_EXPORT_SENSOR,
     CONF_GLOBAL_CONDITION,
+    CONF_GRID_MARGIN,
     CONF_GRID_SENSOR,
     CONF_GRID_SIGN,
     CONF_HOURS_SENSOR,
@@ -43,8 +49,11 @@ from .const import (
     CONF_LOAD_ENTITY,
     CONF_LOAD_TYPE,
     CONF_MANAGE_AT,
+    CONF_MIN_ENTITY,
+    CONF_MIN_HOURS,
     CONF_MIN_OFF,
     CONF_MIN_ON,
+    CONF_MIN_PRIORITY,
     CONF_MODE_ENTITY,
     CONF_NO_SKIP,
     CONF_NOMINAL_POWER,
@@ -52,6 +61,7 @@ from .const import (
     CONF_ON_DELAY,
     CONF_ON_DEMAND,
     CONF_ON_MARGIN,
+    CONF_OUTPUT_ENTITY,
     CONF_POWER_SENSOR,
     CONF_PRIORITY,
     CONF_RESPECT_GLOBAL,
@@ -59,13 +69,18 @@ from .const import (
     CONF_SAFETY_MARGIN,
     CONF_SEASON_ENTITY,
     CONF_SEASONS,
+    CONF_SELL_PRICE_SENSOR,
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
     CONF_STALE_TIMEOUT,
     CONF_TARGET_ENTITY,
     CONF_TARGET_HOURS,
+    CONF_URGENCY_ENTITY,
+    CONF_URGENCY_PRIORITY,
     CONF_VARIABLE_ENTITY,
+    CONF_WINDOW_END,
+    CONF_WINDOW_START,
     CONF_ZERO_INJECTION_ENTITY,
     DOMAIN,
     GRID_SIGN_EXPORT_NEGATIVE,
@@ -95,6 +110,7 @@ from .loads import (
     read_number,
     read_watts,
 )
+from .planner import Plan, Request, Slot, SurplusProfile, plan
 from .settings import config_snapshot, get_settings, load_settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -135,12 +151,59 @@ _STATE_FOR = {
 
 def _next_time(clock: str) -> float:
     """Timestamp of the next local occurrence of a time of day ("HH:MM[:SS]")."""
+    return _occurrence(clock, dt_util.now(), after=True).timestamp()
+
+
+def _occurrence(clock: str, moment: datetime, after: bool) -> datetime:
+    """The first local occurrence of a time of day after `moment`, or the last one at or before it."""
     parsed = dt_util.parse_time(clock) or dt_util.parse_time("00:00:00")
-    now = dt_util.now()
-    moment = now.replace(hour=parsed.hour, minute=parsed.minute, second=parsed.second, microsecond=0)
-    if moment <= now:
-        moment += timedelta(days=1)
-    return moment.timestamp()
+    local = dt_util.as_local(moment)
+    found = local.replace(hour=parsed.hour, minute=parsed.minute, second=parsed.second, microsecond=0)
+    if after and found <= local:
+        found += timedelta(days=1)
+    elif not after and found > local:
+        found -= timedelta(days=1)
+    return found
+
+
+def _in_window(hour: datetime, start: str, end: str) -> bool:
+    """Whether a local hour starts inside a daily window (which may cross midnight)."""
+    first, last = dt_util.parse_time(start), dt_util.parse_time(end)
+    if first is None or last is None:
+        return False
+    clock = hour.time()
+    return first <= clock < last if first <= last else clock >= first or clock < last
+
+
+def _price_at(state: State | None, hour: datetime, today: date) -> tuple[float | None, bool]:
+    """Price of a local hour from the attributes of a price sensor, and whether it is estimated.
+
+    Today's prices are `price_HHh`; tomorrow's, `price_next_day_HHh` when published.
+    Until then, and for any later day, the same hour of today is the estimate.
+    """
+    if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        return None, False
+    key = f"price_{hour.hour:02d}h"
+    estimated = hour.date() != today
+    if hour.date() == today + timedelta(days=1) and f"price_next_day_{hour.hour:02d}h" in state.attributes:
+        key, estimated = f"price_next_day_{hour.hour:02d}h", False
+    try:
+        return float(state.attributes[key]), estimated
+    except (KeyError, TypeError, ValueError):
+        return None, False
+
+
+def _deadline_from(state: State | None, day_start: datetime) -> float | None:
+    """Deadline from an entity: a date and time as it is, or a time of day after the day's start."""
+    if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+        return None
+    if (moment := dt_util.parse_datetime(state.state)) is not None:
+        return dt_util.as_local(moment).timestamp() if moment.tzinfo else moment.replace(
+            tzinfo=dt_util.get_default_time_zone()
+        ).timestamp()
+    if dt_util.parse_time(state.state) is None:
+        return None
+    return _occurrence(state.state, day_start, after=True).timestamp()
 
 
 @dataclass(frozen=True)
@@ -172,6 +235,7 @@ class LoadConfig:
     limit_max: float = 0  # W
     limit_threshold: float = 0  # W
     limit_interval: float = 0  # s
+    output_entity: str | None = None  # % of its output in use (the diverter's duty)
     hours_sensor: str | None = None  # hours on today; None: SolarSplit's own count
     target_entity: str | None = None  # hours wanted per day, read every cycle
     target_hours: float = 0  # h, fixed target when there is no target entity; 0 = none
@@ -180,6 +244,16 @@ class LoadConfig:
     manage_at: str = "00:00:00"  # local time
     seasons: tuple[str, ...] = ()  # options of the season entity; empty = all year
     circuit_sensor: str | None = None  # power of its circuit: its power is learned from the jumps
+    urgency_entity: str | None = None  # while on, the load uses urgency_priority
+    urgency_priority: int = 1
+    min_hours: float = 0  # h guaranteed before the deadline (relay loads); 0 = no minimum
+    min_entity: str | None = None  # minimum hours, read every cycle
+    day_start: str = "00:00:00"  # local time at which the objective's day starts
+    deadline: str | None = None  # local time; None: the end of the objective's day
+    deadline_entity: str | None = None  # input_datetime, time or timestamp sensor
+    min_priority: int = 0  # priority while the minimum is not met; 0 = the normal one
+    window_start: str | None = None  # preferred window for grid fill
+    window_end: str | None = None
 
     @classmethod
     def from_subentry(cls, subentry: ConfigSubentry) -> LoadConfig:
@@ -211,6 +285,7 @@ class LoadConfig:
             limit_max=float(s[CONF_LIMIT_MAX]),
             limit_threshold=float(s[CONF_LIMIT_THRESHOLD]),
             limit_interval=float(s[CONF_LIMIT_INTERVAL]),
+            output_entity=s[CONF_OUTPUT_ENTITY],
             hours_sensor=s[CONF_HOURS_SENSOR],
             target_entity=s[CONF_TARGET_ENTITY],
             target_hours=float(s[CONF_TARGET_HOURS]),
@@ -220,6 +295,17 @@ class LoadConfig:
             manage_at=s[CONF_MANAGE_AT] or "00:00:00",
             seasons=tuple(s[CONF_SEASONS] or ()),
             circuit_sensor=s[CONF_CIRCUIT_SENSOR],
+            urgency_entity=s[CONF_URGENCY_ENTITY],
+            urgency_priority=int(s[CONF_URGENCY_PRIORITY]),
+            # A regulable load is never switched: SolarSplit cannot guarantee it hours.
+            min_hours=0 if s[CONF_LOAD_TYPE] == LOAD_TYPE_REGULABLE else float(s[CONF_MIN_HOURS] or 0),
+            min_entity=None if s[CONF_LOAD_TYPE] == LOAD_TYPE_REGULABLE else s[CONF_MIN_ENTITY],
+            day_start=s[CONF_DAY_START] or "00:00:00",
+            deadline=s[CONF_DEADLINE] or None,
+            deadline_entity=s[CONF_DEADLINE_ENTITY],
+            min_priority=int(s[CONF_MIN_PRIORITY] or 0),
+            window_start=s[CONF_WINDOW_START] or None,
+            window_end=s[CONF_WINDOW_END] or None,
         )
 
     @property
@@ -231,6 +317,11 @@ class LoadConfig:
     def has_target(self) -> bool:
         """Whether the load has a daily target."""
         return self.target_entity is not None or self.target_hours > 0
+
+    @property
+    def has_minimum(self) -> bool:
+        """Whether the load has a minimum to meet before a deadline."""
+        return self.min_entity is not None or self.min_hours > 0
 
 
 @dataclass
@@ -248,22 +339,39 @@ class LoadMemory:
     lowered: bool = False  # regulable: SolarSplit set the limit below the maximum
     today: str | None = None  # local date the counters below refer to
     on_today: float = 0  # s on today in finished runs; the current run is added by on_time()
-    target_done: str | None = None  # local date its daily target was reached
+    target_done: str | None = None  # start of the objective's day in which its maximum was reached
+    day_start: float | None = None  # start of the objective's day the counter below refers to
+    day_on: float = 0  # s on since day_start in finished runs; the current run is added by day_time()
     request: bool = False  # on demand: someone else switched it on and nobody else switched it off
     request_settings: dict[str, Any] | None = None  # climate: what that person set, restored on switch-on
     rearm_at: float | None = None  # Manage switches back on at this time (auto manage)
     learned: list[float] = field(default_factory=list)  # W, last jumps of its circuit when it switched
     learned_at: float | None = None  # time of the change of the last valid measurement
+    saturated_since: float | None = None  # regulable: since when it cannot take more
 
-    def new_day(self, today: str) -> None:
-        """Reset the day's counters when the local date changes."""
+    def new_day(self, today: str, day_start: float | None = None, midnight: float | None = None) -> None:
+        """Reset the day's counters when the local date, or the objective's day, changes.
+
+        The first time (a memory saved before objectives had their own day), an objective
+        day that starts at midnight takes today's hours so far.
+        """
         if self.today != today:
             self.today, self.on_today = today, 0.0
+        if day_start is not None and self.day_start != day_start:
+            first = self.day_start is None and day_start == midnight
+            self.day_start, self.day_on = day_start, self.on_today if first else 0.0
+
+    def _running(self, now: float, since: float) -> float:
+        """Seconds of the current run since `since` at the latest."""
+        return max(now - max(self.last_change, since), 0.0) if self.last_seen and self.last_change else 0.0
 
     def on_time(self, now: float, midnight: float) -> float:
         """Seconds on today, counting the current run since midnight at the latest."""
-        running = now - max(self.last_change, midnight) if self.last_seen and self.last_change else 0.0
-        return self.on_today + max(running, 0.0)
+        return self.on_today + self._running(now, midnight)
+
+    def day_time(self, now: float) -> float:
+        """Seconds on in the objective's day, counting the current run since its start at the latest."""
+        return self.day_on + self._running(now, self.day_start or 0.0)
 
     def observe(
         self, is_on: bool | None, state: State | None, detect_off: bool, midnight: float = 0,
@@ -287,7 +395,9 @@ class LoadMemory:
             elif not is_on and self.last_seen and self.commanded is not False:
                 self.request, self.request_settings = False, None
         if self.last_seen and self.last_change is not None:  # a run ends: add it to today
-            self.on_today += max(state.last_changed.timestamp() - max(self.last_change, midnight), 0.0)
+            end = state.last_changed.timestamp()
+            self.on_today += max(end - max(self.last_change, midnight), 0.0)
+            self.day_on += max(end - max(self.last_change, self.day_start or 0.0), 0.0)
         if self.last_seen is not None or self.last_change is None:
             self.last_change = state.last_changed.timestamp()
         if is_on:
@@ -295,6 +405,33 @@ class LoadMemory:
         elif self.last_seen and detect_off and not on_demand and self.commanded is not False:
             self.switched_off = True
         self.last_seen = is_on
+
+
+@dataclass(frozen=True)
+class Objective:
+    """A load's objective in one cycle. Hours count from the start of the objective's day."""
+
+    day_start: float
+    deadline: float | None  # None: its entity is not usable
+    done: float | None  # h; None: the hours sensor is not usable
+    minimum: float | None  # h; None: no minimum, or its entity is not usable
+    maximum: float | None  # h; None: no maximum, or its entity is not usable
+
+    @property
+    def key(self) -> str:
+        """The objective's day, as stored in the memory."""
+        return f"{self.day_start:.0f}"
+
+    @property
+    def pending(self) -> float | None:
+        """Hours missing to the minimum; None when unknown."""
+        if self.minimum is None or self.done is None:
+            return None
+        return max(self.minimum - self.done, 0.0)
+
+    def open(self, now: float) -> bool:
+        """Whether the minimum is still missing and its deadline has not passed."""
+        return bool(self.pending) and self.deadline is not None and now < self.deadline
 
 
 @dataclass(frozen=True)
@@ -307,6 +444,10 @@ class LoadView:
     power: float
     limit: float | None = None  # regulable: the limit it should have
     on_today: float = 0  # h on today, by SolarSplit's own count
+    effective_priority: int = 0
+    saturated: bool = False  # regulable: it cannot take more surplus
+    objective: Objective | None = None
+    plan: Plan | None = None
 
 
 @dataclass(frozen=True)
@@ -344,6 +485,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             on_margin=self.settings[CONF_ON_MARGIN],
             import_tolerance=self.settings[CONF_IMPORT_TOLERANCE],
             settle_time=self.settings[CONF_SETTLE_TIME],
+            grid_limit=self.grid_cap,
         )
         self.shadow: bool = self.settings[CONF_SHADOW_MODE]
         self.active = True  # master switch
@@ -354,6 +496,16 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.learner = CircuitLearner()
         self._circuits: dict[str, float] = {}  # W, each circuit's reading in this cycle
         self._circuit_on: dict[str, int] = {}  # loads of each circuit that are on in this cycle
+        self.profile = SurplusProfile()  # expected surplus of every hour, from the last days
+        self.objectives: dict[str, Objective] = {}
+        self.plans: dict[str, Plan] = {}
+        self._plan_key: tuple | None = None  # what the plans were made from: replanned when it changes
+
+    @property
+    def grid_cap(self) -> float | None:
+        """W of import grid fill may reach: the contracted power less the margin; None if unknown."""
+        contracted = self.settings[CONF_CONTRACTED_POWER]
+        return max(contracted - self.settings[CONF_GRID_MARGIN], 0.0) if contracted else None
 
     async def async_load_memory(self) -> None:
         """Restore the memory saved by the previous run.
@@ -365,13 +517,14 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             return
         self.active = data.get("active", True)
         self.last_action = data.get("last_action")
+        self.profile = SurplusProfile(data.get("surplus", {}))
         fresh = dt_util.utcnow().timestamp() - data.get("saved_at", 0) <= MARKS_MAX_GAP
         for load_id, saved in data.get("loads", {}).items():
             if load_id not in self.memory:
                 continue  # load deleted since
             memory = LoadMemory(**{k: v for k, v in saved.items() if k in LoadMemory.__dataclass_fields__})
             if not fresh:
-                memory.on_since = memory.off_since = None
+                memory.on_since = memory.off_since = memory.saturated_since = None
             self.memory[load_id] = memory
 
     def _memory_data(self) -> dict[str, Any]:
@@ -379,6 +532,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             "saved_at": dt_util.utcnow().timestamp(),
             "active": self.active,
             "last_action": self.last_action,
+            "surplus": self.profile.days,
             "loads": {load_id: asdict(memory) for load_id, memory in self.memory.items()},
         }
 
@@ -475,17 +629,23 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             return None
         return readings[0][0], readings[1][0]
 
-    def _target(self, load: LoadConfig, memory: LoadMemory, now: float) -> tuple[float | None, float | None]:
-        """Hours on today and hours wanted; None when unknown, or when there is no target."""
-        if not load.has_target:
-            return None, None
-        if load.hours_sensor is None:
-            hours = memory.on_time(now, self._midnight) / 3600
+    def _objective(self, load: LoadConfig, memory: LoadMemory, now: float) -> Objective:
+        """Hours done since the objective's day started, minimum, maximum and deadline."""
+        start = _occurrence(load.day_start, dt_util.utc_from_timestamp(now), after=False)
+        if load.deadline_entity is not None:
+            deadline = _deadline_from(self._state(load.deadline_entity), start)
         else:
-            hours = read_hours(self._state(load.hours_sensor))
-        if load.target_entity is None:
-            return hours, load.target_hours
-        return hours, read_number(self._state(load.target_entity))
+            deadline = _occurrence(load.deadline or load.day_start, start, after=True).timestamp()
+        if load.hours_sensor is None:
+            done = memory.day_time(now) / 3600
+        else:
+            done = read_hours(self._state(load.hours_sensor))
+        minimum = maximum = None
+        if load.has_minimum:
+            minimum = load.min_hours if load.min_entity is None else read_number(self._state(load.min_entity))
+        if load.has_target:
+            maximum = load.target_hours if load.target_entity is None else read_number(self._state(load.target_entity))
+        return Objective(start.timestamp(), deadline, done, minimum, maximum)
 
     def _read_circuits(self, now: float) -> None:
         """Read every circuit sensor, feed the learner and store the measurements that are due."""
@@ -525,7 +685,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         memory = self.memory[load.id]
         state = self._state(load.entity_id)
         is_on = load_is_on(state)
-        memory.new_day(self._today)
+        day_start = _occurrence(load.day_start, dt_util.utc_from_timestamp(now), after=False).timestamp()
+        memory.new_day(self._today, day_start, self._midnight)
         was_on = memory.last_seen
         # In shadow mode nothing is switched by us, so every switch-off would look external.
         memory.observe(
@@ -550,8 +711,9 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         eligible = load.condition_entity is None or entity_has_state(
             self._state(load.condition_entity), load.condition_state
         )
-        hours, target = self._target(load, memory, now)
-        target_done = memory.target_done == self._today
+        objective = self.objectives[load.id] = self._objective(load, memory, now)
+        hours, target = (objective.done, objective.maximum) if load.has_target else (None, None)
+        target_done = memory.target_done == objective.key
         if load.has_target and None in (hours, target) and not target_done and eligible:
             eligible = None  # unknown progress: left as it is
         actual_w = read_watts(self._state(load.power_sensor))
@@ -579,6 +741,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
                 auto=bool(auto), current=current or 0.0, minimum=load.limit_min, maximum=load.limit_max,
                 threshold=load.limit_threshold, interval=load.limit_interval,
                 written=memory.limit_written, lowered=memory.lowered,
+                output=read_number(self._state(load.output_entity)),
             )
             manual, switched_off = False, is_on is False
         else:
@@ -618,7 +781,78 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             in_season=self._in_season(load, season),
             on_demand=load.on_demand,
             request=memory.request,
+            min_pending=objective.open(now),
+            min_priority=load.min_priority or None,
+            # Unknown urgency is not urgency: the normal order is the safe one.
+            urgent=load.urgency_entity is not None and entity_is_on(self._state(load.urgency_entity)) is True,
+            urgency_priority=load.urgency_priority if load.urgency_entity else None,
+            saturated_since=memory.saturated_since,
         )
+
+    def _plan(self, now: float, states: list[LoadState]) -> None:
+        """Plan the grid hours of the loads whose minimum is missing, when what it depends on changes.
+
+        It is replanned every hour, when a price sensor updates, and when the set of
+        loads to plan, their priority, power, minimum or deadline change; not when
+        the hours done move, so a plan holds within the hour.
+        """
+        requests: list[Request] = []
+        for load, state in zip(self.loads, states, strict=True):
+            objective = self.objectives[load.id]
+            if not (state.min_pending and state.managed and state.kind is LoadKind.RELAY):
+                continue
+            requests.append(Request(
+                load.id, state.effective_priority, state.nominal_w, objective.pending or 0.0,
+                objective.deadline or now,
+            ))
+        hour = dt_util.as_local(dt_util.utc_from_timestamp(now)).replace(minute=0, second=0, microsecond=0)
+        buy = self._state(self.settings[CONF_BUY_PRICE_SENSOR])
+        sell = self._state(self.settings[CONF_SELL_PRICE_SENSOR])
+        key = (
+            hour.timestamp(),
+            None if buy is None else buy.last_updated, None if sell is None else sell.last_updated,
+            tuple(
+                (r.load_id, r.priority, round(r.power_w), r.deadline, self.objectives[r.load_id].minimum)
+                for r in requests
+            ),
+        )
+        if key == self._plan_key:
+            return
+        self._plan_key = key
+        if not requests:
+            self.plans = {}
+            return
+        today = hour.date()
+        slots: list[Slot] = []
+        start = hour
+        while start.timestamp() < max(r.deadline for r in requests):
+            buy_price, estimated = _price_at(buy, start, today)
+            sell_price, _ = _price_at(sell, start, today)
+            slots.append(Slot(
+                start.timestamp(), start.timestamp() + 3600, buy_price, sell_price,
+                self.profile.expected(start.hour), estimated,
+            ))
+            start = dt_util.as_local(start + timedelta(hours=1))
+        for i, request in enumerate(requests):
+            load = self.load(request.load_id)
+            if load.window_start and load.window_end:
+                preferred = frozenset(
+                    slot.start for slot in slots
+                    if _in_window(dt_util.as_local(dt_util.utc_from_timestamp(slot.start)),
+                                  load.window_start, load.window_end)
+                )
+                requests[i] = replace(request, preferred=preferred)
+        self.plans = plan(now, slots, requests, self.grid_cap)
+
+    def _fill(self, state: LoadState, now: float) -> LoadState:
+        """Mark a relay load the plan fills from the grid in this hour."""
+        current = self.plans.get(state.id)
+        if (
+            current is None or not current.fill_at(now) or not state.min_pending
+            or state.eligible is not True or state.kind is not LoadKind.RELAY
+        ):
+            return state
+        return replace(state, grid_fill=Reason.GRID_FILL if current.priced else Reason.GRID_FILL_NO_PRICE)
 
     async def _async_update_data(self) -> CycleResult:
         """Run one control cycle."""
@@ -646,6 +880,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self._read_circuits(now)
         season = self._season()
         states = [self._load_state(load, global_on, now, season) for load in self.loads]
+        self._plan(now, states)
+        states = [self._fill(state, now) for state in states]
         decision = decide(
             now, meas, states, self.engine_config,
             self.last_action, active=mode == MODE_NORMAL, pause_reason=pause_reason,
@@ -654,8 +890,14 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             memory = self.memory[load.id]
             memory.on_since = decision.on_since.get(load.id)
             memory.off_since = decision.off_since.get(load.id)
+            memory.saturated_since = decision.saturated_since.get(load.id)
             if load.id in decision.target_reached:
-                memory.target_done = self._today
+                memory.target_done = self.objectives[load.id].key
+        if meas is not None:
+            # What managed loads could use, even the power of grid fill: the hour's surplus.
+            used = sum(state.consumption for state in states if state.controlled or state.filling)
+            local = dt_util.as_local(dt_util.utc_from_timestamp(now))
+            self.profile.add(self._today, local.hour, meas.export_w - meas.import_w + used)
 
         for load_id, value in decision.writes.items():
             await self._async_write_limit(self.load(load_id), value, now)
@@ -669,7 +911,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             assigned_w=sum(s.consumption for s in states if s.controlled),
             decision=decision,
             loads={
-                s.id: self._view(s, decision, self.memory[s.id].on_time(now, self._midnight) / 3600)
+                s.id: self._view(
+                    s, decision, self.memory[s.id].on_time(now, self._midnight) / 3600,
+                    self.objectives.get(s.id), self.plans.get(s.id),
+                )
                 for s in states
             },
         )
@@ -731,7 +976,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
                 await self._async_write_limit(load, load.limit_max, now)
 
     @staticmethod
-    def _view(state: LoadState, decision: Decision, on_today: float) -> LoadView:
+    def _view(
+        state: LoadState, decision: Decision, on_today: float,
+        objective: Objective | None = None, current: Plan | None = None,
+    ) -> LoadView:
         """Summarise a load for its state and reason entities."""
         reason = decision.reasons.get(state.id, decision.reason)
         if (fixed := _STATE_FOR.get(reason)) is not None:
@@ -746,7 +994,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             shown = LOAD_ON if state.is_on else LOAD_OFF
         return LoadView(
             shown, reason, state.is_on if state.available else None, state.consumption,
-            decision.limits.get(state.id), on_today,
+            decision.limits.get(state.id), on_today, state.effective_priority,
+            state.id in decision.saturated, objective, current,
         )
 
     def diagnostics(self) -> dict[str, Any]:
@@ -757,4 +1006,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             "memory": {k: asdict(v) for k, v in self.memory.items()},
             "active": self.active,
             "last_action": self.last_action,
+            "objectives": {k: asdict(v) for k, v in self.objectives.items()},
+            "plans": {k: asdict(v) for k, v in self.plans.items()},
+            "surplus_profile": self.profile.days,
         }

@@ -451,3 +451,107 @@ def test_on_demand_out_of_season_and_unmanaged() -> None:
     assert d.reasons["pool"] is Reason.OUT_OF_SEASON and d.action is Action.NONE
     d = decide(NOW, Measurements(5000, 0), [replace(asked, managed=False)], CFG)
     assert d.reasons["pool"] is Reason.UNMANAGED and d.action is Action.NONE
+
+
+# Priority until the minimum, urgency, grid fill and saturation
+
+
+def depuradora(**kw) -> LoadState:
+    """A pool pump with a minimum: priority 3, 1 while the minimum is missing."""
+    return LoadState(**{"id": "depuradora", "priority": 3, "nominal_w": 530, "is_on": False, "min_priority": 1, **kw})
+
+
+def water_heater(**kw) -> LoadState:
+    """A water heater behind a diverter, priority 2, urgent priority 1, drawing nothing yet."""
+    regulator = Regulator(auto=True, current=1600, minimum=0, maximum=1600)
+    return LoadState(**{
+        "id": "termo", "priority": 2, "nominal_w": 1600, "is_on": True, "actual_w": 0,
+        "kind": LoadKind.REGULABLE, "regulator": regulator, "urgency_priority": 1, **kw,
+    })
+
+
+def test_priority_until_the_minimum_and_after() -> None:
+    meas = Measurements(1100, 0)  # 1000 W: room for one of them
+    pump = replace(depuradora(), priority=5)
+    d = decide(NOW, meas, [replace(pump, min_pending=True), ac(priority=2)], CFG)
+    assert (d.action, d.load_id) == (Action.TURN_ON, "depuradora")
+    assert replace(pump, min_pending=True).effective_priority == 1
+    d = decide(NOW, meas, [pump, ac(priority=2)], CFG)  # minimum met: back to priority 5
+    assert pump.effective_priority == 5
+    assert (d.action, d.load_id) == (Action.TURN_ON, "ac") and d.reasons["depuradora"] is Reason.NO_BUDGET
+
+
+def test_urgency_puts_the_heater_ahead_of_a_minimum_and_then_lets_go() -> None:
+    meas = Measurements(1200, 0)
+    pump = depuradora(min_pending=True)  # its minimum is missing: priority 1
+    d = decide(NOW, meas, [water_heater(urgent=True), pump], CFG)
+    # Urgent priority 1 against priority 1 until the minimum: the urgent load goes first,
+    # and keeps what it could take up to its limit, so the pump does not start.
+    assert water_heater(urgent=True).effective_priority == 1
+    assert d.reasons["termo"] is Reason.FULL_POWER and d.limits["termo"] == 1600
+    assert d.reasons["depuradora"] is Reason.NO_BUDGET and d.action is Action.NONE
+    d = decide(NOW, meas, [water_heater(), pump], CFG)  # urgency off: the normal order is back
+    assert (d.action, d.load_id) == (Action.TURN_ON, "depuradora")
+    assert d.reasons["termo"] is Reason.LIMITED and d.limits["termo"] == 1100 - 530
+
+
+def test_unsaturated_regulable_keeps_what_it_could_take() -> None:
+    # Just started drawing less than offered: not saturated yet, the relay behind it waits.
+    d = decide(NOW, Measurements(1200, 0), [water_heater(urgency_priority=None), ac()], CFG)
+    assert d.reasons["ac"] is Reason.NO_BUDGET and d.action is Action.NONE
+    assert d.saturated_since == {"termo": NOW} and d.saturated == ()
+
+
+def test_saturated_regulable_lets_a_relay_through() -> None:
+    # A thermostat cut: 0 W with surplus still exported for a minute.
+    heater_ = water_heater(saturated_since=NOW - 60)
+    d = decide(NOW, Measurements(1200, 0), [heater_, ac()], CFG)
+    assert d.saturated == ("termo",)
+    assert (d.action, d.load_id, d.reasons["ac"]) == (Action.TURN_ON, "ac", Reason.FITS)
+
+
+def test_regulable_at_full_output_is_saturated() -> None:
+    # Drawing all it can (1550 W at 100 %, close to its limit): what it cannot take is free for the relay.
+    reg = Regulator(auto=True, current=1600, minimum=0, maximum=1600, output=100)
+    heater_ = water_heater(actual_w=1550, regulator=reg, saturated_since=NOW - 60)
+    d = decide(NOW, Measurements(1100, 0), [heater_, ac()], CFG)
+    assert d.saturated == ("termo",) and d.reasons["ac"] is Reason.FITS
+    # The same draw at 60 %: it could take up to its limit, the relay waits
+    reg = replace(reg, output=60)
+    d = decide(NOW, Measurements(1100, 0), [replace(heater_, regulator=reg), ac()], CFG)
+    assert d.saturated == () and d.saturated_since == {} and d.reasons["ac"] is Reason.NO_BUDGET
+
+
+def test_grid_fill_switches_on_without_surplus_or_on_delay() -> None:
+    load = depuradora(grid_fill=Reason.GRID_FILL, min_pending=True, on_delay=300)
+    d = decide(NOW, Measurements(0, 300), [load, ac()], CFG)
+    assert (d.action, d.load_id, d.reason) == (Action.TURN_ON, "depuradora", Reason.GRID_FILL)
+    d = decide(NOW, Measurements(0, 300), [replace(load, grid_fill=Reason.GRID_FILL_NO_PRICE)], CFG)
+    assert d.reason is Reason.GRID_FILL_NO_PRICE
+
+
+def test_grid_fill_respects_min_off_time() -> None:
+    load = depuradora(grid_fill=Reason.GRID_FILL, min_off=600, last_change=NOW - 60)
+    d = decide(NOW, Measurements(0, 300), [load], CFG)
+    assert d.action is Action.NONE and d.reasons["depuradora"] is Reason.MIN_OFF_TIME
+
+
+def test_grid_fill_power_is_not_surplus() -> None:
+    # On from the grid: its 530 W are not added back to the budget, so the AC cannot use them.
+    load = depuradora(is_on=True, grid_fill=Reason.GRID_FILL)
+    assert compute_budget(Measurements(0, 530), [load], CFG) == -630
+    d = decide(NOW, Measurements(0, 530), [load, ac()], CFG)
+    assert d.desired == {"depuradora": True, "ac": False} and d.action is Action.NONE
+
+
+def test_grid_fill_stays_under_the_contracted_power() -> None:
+    cfg = replace(CFG, grid_limit=8200)  # 9200 W contracted, 1000 W margin
+    load = depuradora(grid_fill=Reason.GRID_FILL)
+    d = decide(NOW, Measurements(0, 7800), [load], cfg)
+    assert d.action is Action.NONE and d.reasons["depuradora"] is Reason.GRID_LIMIT
+    d = decide(NOW, Measurements(0, 7600), [load], cfg)
+    assert (d.action, d.load_id) == (Action.TURN_ON, "depuradora")
+    # Already on and the house now draws more: switched off at once (no off delay)
+    on = replace(load, is_on=True, off_delay=300)
+    d = decide(NOW, Measurements(0, 8500), [on], cfg)
+    assert (d.action, d.load_id, d.reason) == (Action.TURN_OFF, "depuradora", Reason.GRID_LIMIT)
