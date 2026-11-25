@@ -132,7 +132,7 @@ MODES = [MODE_NORMAL, MODE_ZERO_INJECTION, MODE_PAUSED]
 LOAD_ON = "on"
 LOAD_OFF = "off"
 LOAD_WAITING = "waiting"  # a change is wanted but a timing rule holds it
-LOAD_BLOCKED = "blocked"  # off, and not allowed to enter
+LOAD_BLOCKED = "blocked"  # off, and not allowed to start even with surplus
 LOAD_MANUAL = "manual"
 LOAD_UNMANAGED = "unmanaged"
 LOAD_UNAVAILABLE = "unavailable"
@@ -141,10 +141,12 @@ LOAD_STATES = [
     LOAD_ON, LOAD_OFF, LOAD_WAITING, LOAD_BLOCKED, LOAD_MANUAL, LOAD_UNMANAGED, LOAD_UNAVAILABLE, LOAD_EXTERNAL,
 ]
 
+# Reasons that keep a load off whatever the surplus. Lack of surplus (no_budget,
+# waiting_higher, grid_limit) is not one of them: such a load is just off.
 _BLOCKING = (
-    Reason.NOT_ELIGIBLE, Reason.WAITING_HIGHER, Reason.NO_BUDGET, Reason.GLOBAL_CONDITION,
-    Reason.GLOBAL_UNKNOWN, Reason.CONDITION_UNKNOWN, Reason.SWITCHED_OFF, Reason.TARGET_REACHED,
-    Reason.WAITING_REQUEST, Reason.OUT_OF_SEASON, Reason.SEASON_UNKNOWN,
+    Reason.NOT_ELIGIBLE, Reason.GLOBAL_CONDITION, Reason.GLOBAL_UNKNOWN, Reason.CONDITION_UNKNOWN,
+    Reason.SWITCHED_OFF, Reason.TARGET_REACHED, Reason.WAITING_REQUEST, Reason.OUT_OF_SEASON,
+    Reason.SEASON_UNKNOWN,
 )
 _STATE_FOR = {
     Reason.MANUAL: LOAD_MANUAL,
@@ -823,7 +825,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             if not (state.min_pending and state.managed and state.kind is LoadKind.RELAY):
                 continue
             requests.append(Request(
-                load.id, state.effective_priority, state.nominal_w, objective.pending or 0.0,
+                load.id, state.plan_priority, state.nominal_w, objective.pending or 0.0,
                 objective.deadline or now,
             ))
         hour = dt_util.as_local(dt_util.utc_from_timestamp(now)).replace(minute=0, second=0, microsecond=0)
@@ -870,12 +872,12 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.plans = plan(now, slots, requests, self.grid_cap)
 
     def _fill(self, state: LoadState, now: float) -> LoadState:
-        """Mark a relay load the plan fills from the grid in this hour."""
+        """Mark a load whose plan counts on this hour, and a relay load it fills from the grid."""
         current = self.plans.get(state.id)
-        if (
-            current is None or not current.fill_at(now) or not state.min_pending
-            or state.eligible is not True or state.kind is not LoadKind.RELAY
-        ):
+        if current is None or not current.planned_at(now) or not state.min_pending:
+            return state
+        state = replace(state, planned=True)
+        if not current.fill_at(now) or state.eligible is not True or state.kind is not LoadKind.RELAY:
             return state
         return replace(state, grid_fill=Reason.GRID_FILL if current.priced else Reason.GRID_FILL_NO_PRICE)
 

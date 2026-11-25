@@ -1258,3 +1258,20 @@ async def test_learned_power_survives_a_restart(hass: HomeAssistant, freezer: Fr
     assert entry.runtime_data.memory[_sid(AC)].learned == learned
     await _cycle(hass, entry, export=1200)
     assert _state(hass, entry, "load_reason", AC) == "fits"  # 900 W learned, not 1500 nominal
+
+
+async def test_no_surplus_is_off_and_a_condition_is_blocked(hass: HomeAssistant) -> None:
+    # In shadow mode at night: no budget is just off, not blocked.
+    entry = await _setup(hass)
+    await _cycle(hass, entry, export=0)
+    assert _state(hass, entry, "load_state", POOL) == "off"
+    assert _state(hass, entry, "load_reason", POOL) == "no_budget"
+    assert _state(hass, entry, "load_state", AC) == "off"
+
+
+async def test_a_load_that_cannot_start_even_with_surplus_is_blocked(hass: HomeAssistant) -> None:
+    hass.states.async_set("input_boolean.climatizar_casa", "off")
+    entry = await _setup(hass, loads=[_load("Pool", POOL, 750, 1, **{CONF_CONDITION_ENTITY: "input_boolean.climatizar_casa"})])
+    await _cycle(hass, entry, export=3000)
+    assert _state(hass, entry, "load_state", POOL) == "blocked"
+    assert _state(hass, entry, "load_reason", POOL) == "not_eligible"

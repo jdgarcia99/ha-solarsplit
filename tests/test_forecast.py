@@ -24,7 +24,7 @@ from custom_components.solarsplit.forecast import (
 )
 
 from .conftest import EXPORT
-from .test_coordinator import ENTRY_ID, _cycle, _setup
+from .test_coordinator import ENTRY_ID, POOL, _cycle, _entity, _setup, _sub_id
 from .test_objectives import BUY, _at, _objective, _plan_hours, _pump, _set_prices
 
 PV = "sensor.pv_power"
@@ -212,3 +212,27 @@ async def test_forecast_entries_are_read_and_summed(hass: HomeAssistant) -> None
     # Forecast.Solar ends its periods: 13:00 is what is produced from 12:00 to 13:00
     start = dt_util.start_of_local_day() + timedelta(hours=12)
     assert total == {start.timestamp(): 1500}
+
+
+async def test_plan_with_todays_prices_and_sun_at_every_hour(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, hass_storage: dict[str, Any]
+) -> None:
+    # The real case: minimum 3 h, window 10:00-17:00, deadline 17:00, sun forecast all day.
+    _at(freezer, 9 + 5 / 60)
+    sell = {9: 0.12495, 10: 0.0527, 11: 0.00503, 12: 0.00512, 13: 0.00516, 14: 0.00669, 15: 0.04645, 16: 0.10332}
+    hass.states.async_set(BUY, "0.19", {f"price_{h:02d}h": 0.2 for h in range(24)})
+    hass.states.async_set("sensor.sell", "0.12", {f"price_{h:02d}h": sell.get(h, 0.15) for h in range(24)})
+    with patch(READ, return_value=_wh({h: 3000 for h in range(9, 17)})):
+        entry = await _setup(
+            hass, loads=[_pump(**{
+                CONF_MIN_HOURS: 3, CONF_DEADLINE: "17:00:00", "min_priority": 1,
+                "window_start": "10:00:00", "window_end": "17:00:00",
+            })],
+            **{CONF_BUY_PRICE_SENSOR: BUY, "sell_price_sensor": "sensor.sell", CONF_FORECAST_ENTRIES: ["f"]},
+        )
+        await _cycle(hass, entry, export=2000)
+    assert _plan_hours(hass, entry, grid=False) == [(0, 11), (0, 12), (0, 13)]
+    assert float(_objective(hass, entry, "objective_cost").state) == pytest.approx(0.0081, abs=1e-4)
+    # At 09:00 the pump keeps its normal priority (3): its minimum is planned for later
+    attr = hass.states.get(_entity(hass, f"{_sub_id(entry, POOL)}_load_state")).attributes
+    assert attr["effective_priority"] == 3

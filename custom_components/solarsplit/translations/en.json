@@ -215,7 +215,7 @@
             },
             "daily_target": {
               "name": "Daily objective",
-              "description": "Hours the load must run each day: a minimum guaranteed before a deadline (relay loads only) and an optional maximum used only with surplus. The day starts at the day start time. If the expected surplus is not enough for the minimum, SolarSplit plans the cheapest hours before the deadline and switches the load on from the grid in them (grid fill). Once the maximum is reached the load is not used until the next day.",
+              "description": "Hours the load must run each day: a minimum guaranteed before a deadline (relay loads only) and an optional maximum used only with surplus. The day starts at the day start time. SolarSplit plans the cheapest hours before the deadline for the minimum, sunny or not: a sunny hour costs what its sun would earn exported, the others the buy price. In a planned hour without enough sun it switches the load on from the grid (grid fill). Once the maximum is reached the load is not used until the next day.",
               "data": {
                 "min_hours": "Minimum hours",
                 "min_entity": "Minimum hours entity",
@@ -237,7 +237,7 @@
                 "day_start": "Local time at which the objective's day starts and its hours count from zero. For example 17:00 with a deadline of 09:00 uses the night.",
                 "deadline": "Local time by which the minimum must be met. Empty: the end of the objective's day.",
                 "deadline_entity": "Input datetime, time or timestamp sensor with the deadline, for another integration to publish it. It takes precedence over the fixed value.",
-                "min_priority": "Priority while the minimum is not met before the deadline; afterwards, the normal one. 0: always the normal one.",
+                "min_priority": "Priority while the minimum is not met before the deadline, only in the hours the plan chose; in other hours and afterwards, the normal one. 0: always the normal one.",
                 "window_start": "Grid fill uses the hours of this window first (for example 10:00 to make use of partial sun and the low prices at midday), and others only if they are not enough.",
                 "window_end": "End of the preferred window. Both or neither.",
                 "hours_sensor": "Sensor with the hours on in the objective's day, for example one of history statistics. Empty: SolarSplit's own count since the day start."
@@ -334,7 +334,7 @@
             },
             "daily_target": {
               "name": "Daily objective",
-              "description": "Hours the load must run each day: a minimum guaranteed before a deadline (relay loads only) and an optional maximum used only with surplus. The day starts at the day start time. If the expected surplus is not enough for the minimum, SolarSplit plans the cheapest hours before the deadline and switches the load on from the grid in them (grid fill). Once the maximum is reached the load is not used until the next day.",
+              "description": "Hours the load must run each day: a minimum guaranteed before a deadline (relay loads only) and an optional maximum used only with surplus. The day starts at the day start time. SolarSplit plans the cheapest hours before the deadline for the minimum, sunny or not: a sunny hour costs what its sun would earn exported, the others the buy price. In a planned hour without enough sun it switches the load on from the grid (grid fill). Once the maximum is reached the load is not used until the next day.",
               "data": {
                 "min_hours": "Minimum hours",
                 "min_entity": "Minimum hours entity",
@@ -356,7 +356,7 @@
                 "day_start": "Local time at which the objective's day starts and its hours count from zero. For example 17:00 with a deadline of 09:00 uses the night.",
                 "deadline": "Local time by which the minimum must be met. Empty: the end of the objective's day.",
                 "deadline_entity": "Input datetime, time or timestamp sensor with the deadline, for another integration to publish it. It takes precedence over the fixed value.",
-                "min_priority": "Priority while the minimum is not met before the deadline; afterwards, the normal one. 0: always the normal one.",
+                "min_priority": "Priority while the minimum is not met before the deadline, only in the hours the plan chose; in other hours and afterwards, the normal one. 0: always the normal one.",
                 "window_start": "Grid fill uses the hours of this window first (for example 10:00 to make use of partial sun and the low prices at midday), and others only if they are not enough.",
                 "window_end": "End of the preferred window. Both or neither.",
                 "hours_sensor": "Sensor with the hours on in the objective's day, for example one of history statistics. Empty: SolarSplit's own count since the day start."

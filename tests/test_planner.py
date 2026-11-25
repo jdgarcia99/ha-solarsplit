@@ -203,3 +203,38 @@ def test_plan_reports_its_surplus_source() -> None:
     assert p.source == SOURCE_LEARNED
     p = plan(10 * H, [Slot(10 * H, 11 * H, 0.1, 0.0)], [_pump(1)], None)["pool"]
     assert p.source == SOURCE_NONE
+
+
+# Today's real prices (25/11): selling is worth a lot early and almost nothing at midday.
+SELL_TODAY = {9: 0.12495, 10: 0.0527, 11: 0.00503, 12: 0.00512, 13: 0.00516, 14: 0.00669, 15: 0.04645,
+              16: 0.10332}
+BUY_TODAY = {9: 0.19182, 10: 0.17839, 11: 0.12255, 12: 0.12267, 13: 0.12244, 14: 0.05534, 15: 0.10494,
+             16: 0.17239}
+
+
+def test_sunny_hours_are_chosen_by_what_the_sun_would_earn_exported() -> None:
+    # Enough surplus expected at every hour from 09:00 to 17:00: the pump (3 h, window
+    # 10:00-17:00) must use the hours whose sun is worth least exported, not the first ones.
+    slots = [Slot(h * H, (h + 1) * H, BUY_TODAY[h], SELL_TODAY[h], 2500.0) for h in range(9, 17)]
+    window = frozenset(h * H for h in range(10, 17))
+    p = plan(9 * H, slots, [_pump(3, preferred=window)], None)["pool"]
+    assert _hours(p, grid=False) == [11, 12, 13] and _hours(p, grid=True) == []
+    assert p.cost == pytest.approx(0.53 * (0.00503 + 0.00512 + 0.00516), abs=1e-5)  # about 0.008 €
+    assert p.cost < 0.01
+    assert not p.planned_at(9 * H + 60) and not p.planned_at(10 * H) and p.planned_at(11 * H)
+
+
+def test_a_sunny_hour_outside_the_window_comes_last() -> None:
+    # 09:00 is the cheapest to sell, but outside the window: only used if the window is not enough.
+    sell = {**SELL_TODAY, 9: 0.001}
+    slots = [Slot(h * H, (h + 1) * H, BUY_TODAY[h], sell[h], 2500.0) for h in range(9, 17)]
+    window = frozenset(h * H for h in range(10, 17))
+    p = plan(9 * H, slots, [_pump(3, preferred=window)], None)["pool"]
+    assert 9 not in _hours(p, grid=False)
+
+
+def test_a_cheap_grid_hour_beats_a_sunny_hour_worth_more_exported() -> None:
+    # At 16:00 selling earns 0.10; buying at 14:00 without sun costs 0.055: 14:00 wins.
+    slots = [Slot(14 * H, 15 * H, 0.055, 0.007, 0.0), Slot(16 * H, 17 * H, 0.17, 0.10, 2500.0)]
+    p = plan(14 * H, slots, [_pump(1)], None)["pool"]
+    assert _hours(p, grid=True) == [14] and _hours(p, grid=False) == []

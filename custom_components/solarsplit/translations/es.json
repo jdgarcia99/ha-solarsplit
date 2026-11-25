@@ -215,7 +215,7 @@
             },
             "daily_target": {
               "name": "Objetivo diario",
-              "description": "Horas que debe funcionar la carga cada día: un mínimo garantizado antes de una hora límite (solo cargas de relé) y un máximo opcional que solo se usa con excedente. El día empieza a la hora de inicio. Si el excedente esperado no basta para el mínimo, SolarSplit planifica las horas más baratas antes de la hora límite y en ellas enciende la carga con red (llenado con red). Al llegar al máximo la carga no se usa hasta el día siguiente.",
+              "description": "Horas que debe funcionar la carga cada día: un mínimo garantizado antes de una hora límite (solo cargas de relé) y un máximo opcional que solo se usa con excedente. El día empieza a la hora de inicio. SolarSplit planifica para el mínimo las horas más baratas antes de la hora límite, haya sol o no: una hora con sol cuesta lo que ese sol ganaría vendido, las demás el precio de compra. En una hora planificada sin sol suficiente enciende la carga con red (llenado con red). Al llegar al máximo la carga no se usa hasta el día siguiente.",
               "data": {
                 "min_hours": "Horas mínimas",
                 "min_entity": "Entidad de horas mínimas",
@@ -237,7 +237,7 @@
                 "day_start": "Hora local a la que empieza el día del objetivo y sus horas vuelven a cero. Por ejemplo 17:00 con hora límite 09:00 aprovecha la madrugada.",
                 "deadline": "Hora local a la que el mínimo debe estar cumplido. Vacío: el final del día del objetivo.",
                 "deadline_entity": "Input datetime, time o sensor de fecha y hora con la hora límite, para que la publique otra integración. Tiene prioridad sobre el valor fijo.",
-                "min_priority": "Prioridad mientras el mínimo no está cumplido antes de la hora límite; después, la normal. 0: siempre la normal.",
+                "min_priority": "Prioridad mientras el mínimo no está cumplido antes de la hora límite, solo en las horas elegidas por el plan; en las demás horas y después, la normal. 0: siempre la normal.",
                 "window_start": "El llenado con red usa primero las horas de esta ventana (por ejemplo desde las 10:00 para aprovechar el sol parcial y los precios bajos de mediodía), y otras solo si no bastan.",
                 "window_end": "Final de la ventana preferente. Las dos o ninguna.",
                 "hours_sensor": "Sensor con las horas encendida en el día del objetivo, por ejemplo uno de estadísticas del historial. Vacío: la cuenta propia de SolarSplit desde el inicio del día."
@@ -334,7 +334,7 @@
             },
             "daily_target": {
               "name": "Objetivo diario",
-              "description": "Horas que debe funcionar la carga cada día: un mínimo garantizado antes de una hora límite (solo cargas de relé) y un máximo opcional que solo se usa con excedente. El día empieza a la hora de inicio. Si el excedente esperado no basta para el mínimo, SolarSplit planifica las horas más baratas antes de la hora límite y en ellas enciende la carga con red (llenado con red). Al llegar al máximo la carga no se usa hasta el día siguiente.",
+              "description": "Horas que debe funcionar la carga cada día: un mínimo garantizado antes de una hora límite (solo cargas de relé) y un máximo opcional que solo se usa con excedente. El día empieza a la hora de inicio. SolarSplit planifica para el mínimo las horas más baratas antes de la hora límite, haya sol o no: una hora con sol cuesta lo que ese sol ganaría vendido, las demás el precio de compra. En una hora planificada sin sol suficiente enciende la carga con red (llenado con red). Al llegar al máximo la carga no se usa hasta el día siguiente.",
               "data": {
                 "min_hours": "Horas mínimas",
                 "min_entity": "Entidad de horas mínimas",
@@ -356,7 +356,7 @@
                 "day_start": "Hora local a la que empieza el día del objetivo y sus horas vuelven a cero. Por ejemplo 17:00 con hora límite 09:00 aprovecha la madrugada.",
                 "deadline": "Hora local a la que el mínimo debe estar cumplido. Vacío: el final del día del objetivo.",
                 "deadline_entity": "Input datetime, time o sensor de fecha y hora con la hora límite, para que la publique otra integración. Tiene prioridad sobre el valor fijo.",
-                "min_priority": "Prioridad mientras el mínimo no está cumplido antes de la hora límite; después, la normal. 0: siempre la normal.",
+                "min_priority": "Prioridad mientras el mínimo no está cumplido antes de la hora límite, solo en las horas elegidas por el plan; en las demás horas y después, la normal. 0: siempre la normal.",
                 "window_start": "El llenado con red usa primero las horas de esta ventana (por ejemplo desde las 10:00 para aprovechar el sol parcial y los precios bajos de mediodía), y otras solo si no bastan.",
                 "window_end": "Final de la ventana preferente. Las dos o ninguna.",
                 "hours_sensor": "Sensor con las horas encendida en el día del objetivo, por ejemplo uno de estadísticas del historial. Vacío: la cuenta propia de SolarSplit desde el inicio del día."

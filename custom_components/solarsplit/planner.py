@@ -1,13 +1,14 @@
-"""Grid hours a relay load needs to meet its minimum before its deadline, at the lowest cost.
+"""Hours a relay load should run in to meet its minimum before its deadline, at the lowest cost.
 
 The expected surplus of every hour comes from the solar forecast less the
 house's base load learned on the last days, or, without a forecast for that
-hour, from the surplus seen on the last days (`HourlyProfile`). Hours with enough expected surplus count first;
-what is still missing is bought from the grid in the cheapest hours, preferring
-the load's window, without going over the grid capacity. Without prices the
-last hours before the deadline are used. No Home Assistant imports: times are
-timestamps in seconds.
-"""
+hour, from the surplus seen on the last days (`HourlyProfile`). Every hour
+before the deadline has an effective price: the sell price for what the
+expected surplus covers (what that sun would earn exported) and the buy price
+for the rest. The cheapest hours are chosen, the load's preferred window first,
+sunny or not; hours that need the grid must fit in the grid capacity. Without
+prices, sunny hours first and then the last hours before the deadline. No Home
+Assistant imports: times are timestamps in seconds."""
 
 from __future__ import annotations
 
@@ -104,6 +105,10 @@ class Plan:
         sources = {slot.source for slot in self.slots} | set(self.sources)
         return next((source for source in SOURCES if source in sources), SOURCE_NONE)
 
+    def planned_at(self, now: float) -> bool:
+        """Whether the plan counts on the hour that contains `now`, from the sun or the grid."""
+        return any(slot.start <= now < slot.end for slot in self.slots)
+
     def fill_at(self, now: float) -> bool:
         """Whether the plan buys the hour that contains `now` from the grid."""
         return any(slot.grid and slot.start <= now < slot.end for slot in self.slots)
@@ -156,23 +161,13 @@ def _plan_one(now: float, slots: list[Slot], req: Request, usage: _Usage) -> Pla
     chosen: list[PlannedSlot] = []
     need = req.pending_h
 
-    # Hours with enough expected surplus come first, in time order: the load runs then anyway.
-    on_surplus: set[float] = set()
-    for slot, hours in usable:
-        if need <= 1e-9:
-            break
-        if usage.surplus[slot.start] >= req.power_w:
-            take = min(hours, need)
-            chosen.append(_planned(slot, take, False, usage.surplus[slot.start], req.power_w, priced))
-            usage.surplus[slot.start] -= req.power_w
-            on_surplus.add(slot.start)
-            need -= take
+    def sunny(slot: Slot) -> bool:
+        return usage.surplus[slot.start] >= req.power_w
 
-    # The rest from the grid: the cheapest hours (the preferred window first), or the last ones.
-    candidates = [
-        (slot, hours) for slot, hours in usable
-        if slot.start not in on_surplus and usage.fits(slot, req.power_w)
-    ]
+    # Every hour competes on its effective price: the sell price for what the expected surplus
+    # covers (what that sun would earn exported), the buy price for the rest. The preferred
+    # window comes first. An hour that needs the grid must fit in the grid capacity.
+    candidates = [(slot, hours) for slot, hours in usable if sunny(slot) or usage.fits(slot, req.power_w)]
     if priced:
         candidates.sort(key=lambda item: (
             item[0].start not in req.preferred,
@@ -180,14 +175,22 @@ def _plan_one(now: float, slots: list[Slot], req: Request, usage: _Usage) -> Pla
             item[0].start,
         ))
     else:
-        candidates.sort(key=lambda item: -item[0].start)
+        # Without prices the sun still costs nothing: sunny hours first (the window first,
+        # then in time order), then the last hours before the deadline.
+        candidates.sort(key=lambda item: (
+            not sunny(item[0]),
+            item[0].start not in req.preferred if sunny(item[0]) else 0,
+            item[0].start if sunny(item[0]) else -item[0].start,
+        ))
     for slot, hours in candidates:
         if need <= 1e-9:
             break
         take = min(hours, need)
-        chosen.append(_planned(slot, take, True, usage.surplus[slot.start], req.power_w, priced))
-        usage.grid_w[slot.start] += req.power_w
-        usage.grid_loads[slot.start] += 1
+        grid = not sunny(slot)
+        chosen.append(_planned(slot, take, grid, usage.surplus[slot.start], req.power_w, priced))
+        if grid:
+            usage.grid_w[slot.start] += req.power_w
+            usage.grid_loads[slot.start] += 1
         usage.surplus[slot.start] = max(usage.surplus[slot.start] - req.power_w, 0.0)
         need -= take
     return Plan(

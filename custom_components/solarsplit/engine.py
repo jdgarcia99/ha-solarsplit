@@ -151,9 +151,12 @@ class LoadState:
     on_demand: bool = False
     request: bool = False
     # Objective: minimum hours before a deadline. `min_pending` while it is not met and
-    # the deadline has not passed; `min_priority` replaces the priority meanwhile.
+    # the deadline has not passed; `min_priority` replaces the priority meanwhile, but only
+    # in the hours the plan chose (`planned`): elsewhere the normal priority, so the load
+    # does not get ahead of others to spend sun that is worth more exported.
     min_pending: bool = False
     min_priority: int | None = None
+    planned: bool = False
     # Urgency: while its entity is on, `urgency_priority` replaces every other priority.
     urgent: bool = False
     urgency_priority: int | None = None
@@ -164,7 +167,16 @@ class LoadState:
 
     @property
     def effective_priority(self) -> int:
-        """Priority in this cycle: urgency first, then the one until the minimum, then the normal one."""
+        """Priority in this cycle: urgency first, then the one until the minimum in a planned hour, then the normal one."""
+        if self.urgent and self.urgency_priority is not None:
+            return self.urgency_priority
+        if self.min_pending and self.planned and self.min_priority is not None:
+            return self.min_priority
+        return self.priority
+
+    @property
+    def plan_priority(self) -> int:
+        """Order in which the plan serves the loads: urgency, then the priority until the minimum."""
         if self.urgent and self.urgency_priority is not None:
             return self.urgency_priority
         if self.min_pending and self.min_priority is not None:

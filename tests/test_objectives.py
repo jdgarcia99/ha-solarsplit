@@ -27,6 +27,7 @@ from custom_components.solarsplit.const import (
 )
 
 from .test_coordinator import (
+    ENTRY_ID,
     POOL,
     TERMO_POWER,
     _cycle,
@@ -227,21 +228,42 @@ async def test_deadline_from_an_entity(hass: HomeAssistant, freezer: FrozenDateT
     assert _objective(hass, entry, "objective_deadline").state == "unknown"
 
 
-async def test_priority_until_the_minimum(hass: HomeAssistant, freezer: FrozenDateTimeFactory) -> None:
+def _seed_surplus(hass_storage: dict[str, Any], watts_by_hour: dict[int, float]) -> None:
+    """A saved memory with surplus seen on a past day at some hours."""
+    hours = [[0.0, 0] for _ in range(24)]
+    for hour, watts in watts_by_hour.items():
+        hours[hour] = [watts, 1]
+    hass_storage[f"solarsplit.{ENTRY_ID}"] = {
+        "version": 1, "key": f"solarsplit.{ENTRY_ID}",
+        "data": {"saved_at": dt_util.utcnow().timestamp(), "loads": {}, "surplus": {"2026-01-01": hours}},
+    }
+
+
+@pytest.mark.parametrize(("sunny_hour", "pump_first"), [(10, True), (15, False)])
+async def test_priority_until_the_minimum_only_in_planned_hours(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, hass_storage: dict[str, Any],
+    sunny_hour: int, pump_first: bool,
+) -> None:
+    # The plan counts on the sun at one hour. At 10:00 the pump (priority 3, 1 until the
+    # minimum) goes ahead of the AC (priority 2) only if 10:00 is that hour.
     _at(freezer, 10)
+    _seed_surplus(hass_storage, {sunny_hour: 2000})
     entry = await _setup(hass, loads=[
-        _pump(**{CONF_MIN_HOURS: 1, CONF_MIN_PRIORITY: 1}), _load("Salon", "climate.ac_salon", 900, 2),
+        _pump(**{CONF_MIN_HOURS: 1, CONF_MIN_PRIORITY: 1, CONF_DEADLINE: "17:00:00"}),
+        _load("Salon", "climate.ac_salon", 900, 2),
     ])
     await _cycle(hass, entry, export=1100)  # room for one of them
-    assert _state(hass, entry, "load_reason", POOL) == "fits"
+    assert _plan_hours(hass, entry, grid=False) == [(0, sunny_hour)]
     attr = hass.states.get(_entity(hass, f"{_sub_id(entry, POOL)}_load_state")).attributes
-    assert attr["effective_priority"] == 1
+    assert attr["effective_priority"] == (1 if pump_first else 3)
+    assert _state(hass, entry, "load_reason", POOL) == ("fits" if pump_first else "no_budget")
 
 
 async def test_urgency_puts_the_heater_first_and_then_lets_go(
-    hass: HomeAssistant, freezer: FrozenDateTimeFactory
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, hass_storage: dict[str, Any]
 ) -> None:
     _at(freezer, 12)
+    _seed_surplus(hass_storage, {12: 2000, 13: 2000})  # the plan counts on the sun now
     hass.states.async_set(RISK, "on")
     entry, _ = await _setup_termo(hass, shadow=True, power=0, loads=[
         _pump(**{CONF_MIN_HOURS: 2, CONF_MIN_PRIORITY: 1}),

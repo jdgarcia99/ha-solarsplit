@@ -473,17 +473,32 @@ def water_heater(**kw) -> LoadState:
 def test_priority_until_the_minimum_and_after() -> None:
     meas = Measurements(1100, 0)  # 1000 W: room for one of them
     pump = replace(depuradora(), priority=5)
-    d = decide(NOW, meas, [replace(pump, min_pending=True), ac(priority=2)], CFG)
+    # In an hour the plan chose, the minimum still missing: priority 1
+    planned = replace(pump, min_pending=True, planned=True)
+    d = decide(NOW, meas, [planned, ac(priority=2)], CFG)
+    assert planned.effective_priority == 1
     assert (d.action, d.load_id) == (Action.TURN_ON, "depuradora")
-    assert replace(pump, min_pending=True).effective_priority == 1
-    d = decide(NOW, meas, [pump, ac(priority=2)], CFG)  # minimum met: back to priority 5
+    # Minimum met: back to priority 5
+    d = decide(NOW, meas, [pump, ac(priority=2)], CFG)
     assert pump.effective_priority == 5
     assert (d.action, d.load_id) == (Action.TURN_ON, "ac") and d.reasons["depuradora"] is Reason.NO_BUDGET
 
 
+def test_priority_until_the_minimum_only_in_planned_hours() -> None:
+    # Minimum missing, but the plan chose other (cheaper) hours: the normal priority, so the
+    # pump does not get ahead to spend sun that is worth more exported now.
+    pump = depuradora(priority=5, min_pending=True, planned=False)
+    assert pump.effective_priority == 5 and pump.plan_priority == 1
+    d = decide(NOW, Measurements(1100, 0), [pump, ac(priority=2)], CFG)
+    assert (d.action, d.load_id) == (Action.TURN_ON, "ac")
+    # With surplus left after the loads ahead, it may still use it
+    d = decide(NOW, Measurements(1800, 0), [pump, ac(priority=2, is_on=True)], CFG)
+    assert (d.action, d.load_id) == (Action.TURN_ON, "depuradora")
+
+
 def test_urgency_puts_the_heater_ahead_of_a_minimum_and_then_lets_go() -> None:
     meas = Measurements(1200, 0)
-    pump = depuradora(min_pending=True)  # its minimum is missing: priority 1
+    pump = depuradora(min_pending=True, planned=True)  # its minimum is missing in a planned hour: priority 1
     d = decide(NOW, meas, [water_heater(urgent=True), pump], CFG)
     # Urgent priority 1 against priority 1 until the minimum: the urgent load goes first,
     # and keeps what it could take up to its limit, so the pump does not start.
