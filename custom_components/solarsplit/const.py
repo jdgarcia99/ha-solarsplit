@@ -25,6 +25,8 @@ CONF_BUY_PRICE_SENSOR = "buy_price_sensor"  # €/kWh now, with attributes price
 CONF_SELL_PRICE_SENSOR = "sell_price_sensor"  # same, for the energy exported
 CONF_CONTRACTED_POWER = "contracted_power"  # W; 0 = unknown: one load at a time in grid fill
 CONF_GRID_MARGIN = "grid_margin"  # W kept below the contracted power by grid fill
+CONF_FORECAST_ENTRIES = "solar_forecast_entries"  # config entries with a solar forecast, summed
+CONF_BASE_LOAD = "base_load"  # W the house uses in an hour not learned yet
 
 GRID_SIGN_EXPORT_NEGATIVE = "export_negative"  # negative = export, positive = import
 GRID_SIGN_EXPORT_POSITIVE = "export_positive"
@@ -41,6 +43,7 @@ DEFAULT_IMPORT_TOLERANCE = 150  # W, deficit tolerated before a load is switched
 DEFAULT_STALE_TIMEOUT = 20  # s, a grid reading not reported for longer is unknown; 0 = never
 DEFAULT_CONTRACTED_POWER = 0  # W, unknown
 DEFAULT_GRID_MARGIN = 1000  # W
+DEFAULT_BASE_LOAD = 400  # W
 
 MIN_CYCLE_INTERVAL = 2
 MAX_CYCLE_INTERVAL = 60

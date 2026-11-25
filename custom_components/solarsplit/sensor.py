@@ -280,13 +280,16 @@ class CostSensor(ObjectiveSensor):
         """Planned hours with their prices, hours bought from the grid, hours that do not fit, and whether priced."""
         plan = self.view.plan
         if plan is None:
-            return {"plan": [], "grid_hours": 0.0, "grid_kwh": 0.0, "short_hours": 0.0, "priced": None}
+            return {
+                "plan": [], "grid_hours": 0.0, "grid_kwh": 0.0, "short_hours": 0.0, "priced": None,
+                "surplus_source": None,
+            }
         return {
             "plan": [
                 {
                     "start": _iso(slot.start), "hours": slot.hours, "kwh": slot.kwh, "grid": slot.grid,
                     "buy": slot.buy, "sell": slot.sell, "price": slot.price, "cost": slot.cost,
-                    "estimated": slot.estimated,
+                    "estimated": slot.estimated, "source": slot.source,
                 }
                 for slot in plan.slots
             ],
@@ -294,4 +297,5 @@ class CostSensor(ObjectiveSensor):
             "grid_kwh": round(plan.grid_kwh, 4),
             "short_hours": plan.short_h,
             "priced": plan.priced,
+            "surplus_source": plan.source,
         }

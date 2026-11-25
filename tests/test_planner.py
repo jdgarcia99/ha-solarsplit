@@ -1,13 +1,20 @@
 """Grid fill plan and expected surplus, without Home Assistant."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from custom_components.solarsplit.planner import (
     PROFILE_DAYS,
+    SOURCE_FORECAST,
+    SOURCE_LEARNED,
+    SOURCE_NONE,
+    HourlyProfile,
     Request,
     Slot,
-    SurplusProfile,
+    expected_surplus,
     plan,
+    sum_forecasts,
 )
 
 H = 3600.0
@@ -113,7 +120,7 @@ def test_objective_across_midnight() -> None:
 
 
 def test_surplus_profile_is_the_median_of_the_last_days() -> None:
-    profile = SurplusProfile()
+    profile = HourlyProfile()
     assert profile.expected(12) == 0
     for day, watts in enumerate([100, 2000, 1800, 1900]):
         profile.add(f"2026-11-{day + 1:02d}", 12, watts)
@@ -124,3 +131,75 @@ def test_surplus_profile_is_the_median_of_the_last_days() -> None:
     for day in range(5, 5 + PROFILE_DAYS):
         profile.add(f"2026-11-{day:02d}", 12, 500)
     assert len(profile.days) == PROFILE_DAYS and profile.expected(12) == 500
+
+
+# Expected surplus from the solar forecast
+
+TZ = UTC
+
+
+def _hour(h: int, day: int = 25) -> datetime:
+    return datetime(2026, 11, day, h, tzinfo=TZ)
+
+
+def test_forecasts_are_summed_and_period_ends_shifted() -> None:
+    # Forecast.Solar: the value at 09:00 is what is produced from 08:00 to 09:00
+    string_1 = {_hour(9).isoformat(): 400, _hour(10).isoformat(): 900}
+    string_2 = {_hour(9).isoformat(): 100}
+    other = {_hour(9).isoformat(): 50}  # an integration that gives the period start
+    total = sum_forecasts([(string_1, True), (string_2, True), (other, False)], TZ)
+    assert total == {_hour(8).timestamp(): 500, _hour(9).timestamp(): 950}
+
+
+def test_expected_surplus_with_forecast_and_learned_base_load() -> None:
+    forecast = {_hour(12).timestamp(): 3000.0}
+    base = HourlyProfile()
+    base.add("2026-11-24", 12, 900)
+    learned = HourlyProfile()
+    learned.add("2026-11-24", 12, 2500)
+    covered = {_hour(12).date()}
+    assert expected_surplus(_hour(12), forecast, covered, base, 400, learned) == (2100, SOURCE_FORECAST)
+
+
+def test_expected_surplus_with_forecast_and_no_consumption_history() -> None:
+    forecast = {_hour(12).timestamp(): 3000.0}
+    covered = {_hour(12).date()}
+    result = expected_surplus(_hour(12), forecast, covered, HourlyProfile(), 400, HourlyProfile())
+    assert result == (2600, SOURCE_FORECAST)  # the fixed base load
+    # A small forecast never makes a negative surplus
+    assert expected_surplus(_hour(12), {_hour(12).timestamp(): 300.0}, covered, HourlyProfile(), 400,
+                            HourlyProfile()) == (0, SOURCE_FORECAST)
+
+
+def test_expected_surplus_without_forecast() -> None:
+    learned = HourlyProfile()
+    learned.add("2026-11-24", 12, 1800)
+    assert expected_surplus(_hour(12), None, set(), HourlyProfile(), 400, learned) == (1800, SOURCE_LEARNED)
+    assert expected_surplus(_hour(13), None, set(), HourlyProfile(), 400, learned) == (0, SOURCE_NONE)
+
+
+def test_partial_forecast() -> None:
+    # Today is covered (an hour it does not list, like the night, produces nothing);
+    # the day after is not: the learned surplus.
+    forecast = {_hour(12).timestamp(): 3000.0}
+    covered = {_hour(12).date()}
+    learned = HourlyProfile()
+    for hour in (13, 12):
+        learned.add("2026-11-24", hour, 1500)
+    assert expected_surplus(_hour(13), forecast, covered, HourlyProfile(), 400, learned) == (0, SOURCE_FORECAST)
+    assert expected_surplus(_hour(12, day=26), forecast, covered, HourlyProfile(), 400, learned) == (
+        1500, SOURCE_LEARNED,
+    )
+
+
+def test_plan_reports_its_surplus_source() -> None:
+    slots = [
+        Slot(h * H, (h + 1) * H, BUY[h], SELL[h], 2000.0 if h == 12 else 0.0, source=SOURCE_FORECAST)
+        for h in range(10, 14)
+    ] + [Slot(h * H, (h + 1) * H, BUY[h], SELL[h], 0.0, source=SOURCE_LEARNED) for h in range(14, 17)]
+    p = plan(10 * H, slots, [_pump(1)], None)["pool"]
+    assert p.source == SOURCE_FORECAST and p.slots[0].source == SOURCE_FORECAST
+    p = plan(10 * H, slots[4:], [_pump(1)], None)["pool"]
+    assert p.source == SOURCE_LEARNED
+    p = plan(10 * H, [Slot(10 * H, 11 * H, 0.1, 0.0)], [_pump(1)], None)["pool"]
+    assert p.source == SOURCE_NONE

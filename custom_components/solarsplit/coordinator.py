@@ -23,6 +23,7 @@ from homeassistant.util import dt as dt_util
 from .const import (
     CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
+    CONF_BASE_LOAD,
     CONF_BUY_PRICE_SENSOR,
     CONF_CIRCUIT_SENSOR,
     CONF_CONDITION_ENTITY,
@@ -33,6 +34,7 @@ from .const import (
     CONF_DEADLINE,
     CONF_DEADLINE_ENTITY,
     CONF_EXPORT_SENSOR,
+    CONF_FORECAST_ENTRIES,
     CONF_GLOBAL_CONDITION,
     CONF_GRID_MARGIN,
     CONF_GRID_SENSOR,
@@ -64,6 +66,7 @@ from .const import (
     CONF_OUTPUT_ENTITY,
     CONF_POWER_SENSOR,
     CONF_PRIORITY,
+    CONF_PV_SENSOR,
     CONF_RESPECT_GLOBAL,
     CONF_RESPECT_MANUAL,
     CONF_SAFETY_MARGIN,
@@ -97,6 +100,7 @@ from .engine import (
     Regulator,
     decide,
 )
+from .forecast import async_read_forecast
 from .learning import KEEP, Change, CircuitLearner, learned_power
 from .loads import (
     CLIMATE,
@@ -110,7 +114,7 @@ from .loads import (
     read_number,
     read_watts,
 )
-from .planner import Plan, Request, Slot, SurplusProfile, plan
+from .planner import HourlyProfile, Plan, Request, Slot, expected_surplus, plan
 from .settings import config_snapshot, get_settings, load_settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -118,6 +122,7 @@ _LOGGER = logging.getLogger(__name__)
 STORAGE_VERSION = 1
 SAVE_DELAY = 10  # s, batch memory writes
 MARKS_MAX_GAP = 120  # s, delay marks older than this gap are dropped on restore
+FORECAST_REFRESH = 300  # s between two reads of the solar forecast
 
 MODE_NORMAL = "normal"
 MODE_ZERO_INJECTION = "zero_injection"
@@ -496,7 +501,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.learner = CircuitLearner()
         self._circuits: dict[str, float] = {}  # W, each circuit's reading in this cycle
         self._circuit_on: dict[str, int] = {}  # loads of each circuit that are on in this cycle
-        self.profile = SurplusProfile()  # expected surplus of every hour, from the last days
+        self.profile = HourlyProfile()  # surplus seen at every hour of the last days
+        self.base = HourlyProfile()  # house's power at every hour of the last days, without SolarSplit's loads
+        self.forecast: dict[float, float] | None = None  # Wh per local hour start, summed
+        self._forecast_read: float | None = None  # time of the last read
         self.objectives: dict[str, Objective] = {}
         self.plans: dict[str, Plan] = {}
         self._plan_key: tuple | None = None  # what the plans were made from: replanned when it changes
@@ -517,7 +525,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             return
         self.active = data.get("active", True)
         self.last_action = data.get("last_action")
-        self.profile = SurplusProfile(data.get("surplus", {}))
+        self.profile = HourlyProfile(data.get("surplus", {}))
+        self.base = HourlyProfile(data.get("base", {}))
         fresh = dt_util.utcnow().timestamp() - data.get("saved_at", 0) <= MARKS_MAX_GAP
         for load_id, saved in data.get("loads", {}).items():
             if load_id not in self.memory:
@@ -533,6 +542,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             "active": self.active,
             "last_action": self.last_action,
             "surplus": self.profile.days,
+            "base": self.base.days,
             "loads": {load_id: asdict(memory) for load_id, memory in self.memory.items()},
         }
 
@@ -789,10 +799,21 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             saturated_since=memory.saturated_since,
         )
 
+    async def _async_update_forecast(self, now: float) -> None:
+        """Read the solar forecast of the chosen entries every few minutes; None without one."""
+        entries = self.settings[CONF_FORECAST_ENTRIES]
+        if not entries:
+            self.forecast = None
+            return
+        if self._forecast_read is not None and now - self._forecast_read < FORECAST_REFRESH:
+            return
+        self._forecast_read = now
+        self.forecast = await async_read_forecast(self.hass, entries)
+
     def _plan(self, now: float, states: list[LoadState]) -> None:
         """Plan the grid hours of the loads whose minimum is missing, when what it depends on changes.
 
-        It is replanned every hour, when a price sensor updates, and when the set of
+        It is replanned every hour, when a price sensor or the solar forecast updates, and when the set of
         loads to plan, their priority, power, minimum or deadline change; not when
         the hours done move, so a plan holds within the hour.
         """
@@ -811,6 +832,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         key = (
             hour.timestamp(),
             None if buy is None else buy.last_updated, None if sell is None else sell.last_updated,
+            None if self.forecast is None else tuple(sorted(self.forecast.items())),
             tuple(
                 (r.load_id, r.priority, round(r.power_w), r.deadline, self.objectives[r.load_id].minimum)
                 for r in requests
@@ -823,14 +845,17 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             self.plans = {}
             return
         today = hour.date()
+        covered = {dt_util.as_local(dt_util.utc_from_timestamp(t)).date() for t in self.forecast or {}}
         slots: list[Slot] = []
         start = hour
         while start.timestamp() < max(r.deadline for r in requests):
             buy_price, estimated = _price_at(buy, start, today)
             sell_price, _ = _price_at(sell, start, today)
+            surplus, source = expected_surplus(
+                start, self.forecast, covered, self.base, self.settings[CONF_BASE_LOAD], self.profile
+            )
             slots.append(Slot(
-                start.timestamp(), start.timestamp() + 3600, buy_price, sell_price,
-                self.profile.expected(start.hour), estimated,
+                start.timestamp(), start.timestamp() + 3600, buy_price, sell_price, surplus, estimated, source,
             ))
             start = dt_util.as_local(start + timedelta(hours=1))
         for i, request in enumerate(requests):
@@ -880,6 +905,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self._read_circuits(now)
         season = self._season()
         states = [self._load_state(load, global_on, now, season) for load in self.loads]
+        await self._async_update_forecast(now)
         self._plan(now, states)
         states = [self._fill(state, now) for state in states]
         decision = decide(
@@ -898,6 +924,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             used = sum(state.consumption for state in states if state.controlled or state.filling)
             local = dt_util.as_local(dt_util.utc_from_timestamp(now))
             self.profile.add(self._today, local.hour, meas.export_w - meas.import_w + used)
+            if (pv := read_watts(self._state(self.settings[CONF_PV_SENSOR]))) is not None:
+                # The house's base load: what it uses without any of SolarSplit's loads.
+                loads = sum(state.consumption for state in states if state.available)
+                self.base.add(self._today, local.hour, pv + meas.import_w - meas.export_w - loads)
 
         for load_id, value in decision.writes.items():
             await self._async_write_limit(self.load(load_id), value, now)
@@ -1009,4 +1039,6 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             "objectives": {k: asdict(v) for k, v in self.objectives.items()},
             "plans": {k: asdict(v) for k, v in self.plans.items()},
             "surplus_profile": self.profile.days,
+            "base_profile": self.base.days,
+            "forecast": self.forecast,
         }

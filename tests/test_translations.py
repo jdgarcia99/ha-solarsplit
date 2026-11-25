@@ -22,6 +22,7 @@ from custom_components.solarsplit.const import (
 )
 from custom_components.solarsplit.coordinator import LOAD_STATES, MODES
 from custom_components.solarsplit.engine import Action, Reason
+from custom_components.solarsplit.planner import SOURCES
 from custom_components.solarsplit.settings import DEFAULTS, LOAD_DEFAULTS
 
 FOLDER = Path(__file__).parents[1] / "custom_components" / DOMAIN
@@ -76,6 +77,8 @@ def test_enum_sensors_and_reason_codes_are_translated() -> None:
     assert _states("load_reason") == reasons
     attributes = TEXTS["strings"]["entity"]["sensor"]["last_decision"]["state_attributes"]
     assert set(attributes["reason"]["state"]) == reasons
+    cost = TEXTS["strings"]["entity"]["sensor"]["objective_cost"]["state_attributes"]
+    assert set(cost["surplus_source"]["state"]) == set(SOURCES)
 
 
 def _fields(schema: vol.Schema) -> list[tuple[str | None, str, Any]]:
@@ -105,7 +108,8 @@ def test_every_form_field_is_translated() -> None:
     config = TEXTS["strings"]["config"]["step"]["user"]
     options = TEXTS["strings"]["options"]["step"]["init"]
     for step in (config, options):
-        _check_form(step, settings_schema(DEFAULTS))
+        # With a solar forecast entry the forecast field is shown too.
+        _check_form(step, settings_schema(DEFAULTS, [("entry_id", "Forecast.Solar")]))
     for step_id in ("user", "reconfigure"):
         step = TEXTS["strings"]["config_subentries"][SUBENTRY_LOAD]["step"][step_id]
         # With a season entity the seasons field is shown too.

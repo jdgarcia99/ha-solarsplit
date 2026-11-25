@@ -27,7 +27,9 @@
           "buy_price_sensor": "Sensor de precio de compra",
           "sell_price_sensor": "Sensor de precio de venta",
           "contracted_power": "Potencia contratada",
-          "grid_margin": "Margen del llenado con red"
+          "grid_margin": "Margen del llenado con red",
+          "solar_forecast_entries": "Entradas de previsión solar",
+          "base_load": "Consumo base"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -49,7 +51,9 @@
           "buy_price_sensor": "Precio de la energía comprada, en €/kWh, con los atributos price_00h…price_23h (por ejemplo el sensor PVPC de la integración ESIOS). Los precios de mañana se leen de price_next_day_00h… cuando se publican; hasta entonces se estima con la misma hora de hoy. Vacío: sin precios, y el llenado con red usa las últimas horas antes de cada hora límite.",
           "sell_price_sensor": "Precio de la energía exportada, en €/kWh, con los mismos atributos. Una hora con excedente esperado cuesta este precio; vacío: no cuesta nada.",
           "contracted_power": "Potencia que se puede tomar de la red. Las cargas que completan su mínimo con red nunca llevan la importación por encima de esta potencia menos el margen, ni en el plan ni en vivo. 0: desconocida, solo una carga a la vez completa con red.",
-          "grid_margin": "Potencia que se reserva por debajo de la contratada para el resto de la casa mientras hay cargas completando con red."
+          "grid_margin": "Potencia que se reserva por debajo de la contratada para el resto de la casa mientras hay cargas completando con red.",
+          "solar_forecast_entries": "Entradas de Forecast.Solar (u otras integraciones con previsión solar para el panel de Energía), sumadas: por ejemplo una por string. El excedente esperado de una hora es la previsión menos el consumo base de la casa en esa hora. Vacío, o sin datos para una hora: el excedente observado a esa hora en los últimos días.",
+          "base_load": "Consumo de la casa sin las cargas de SolarSplit que se usa en una hora con previsión antes de haberla aprendido. Se aprende por hora (mediana de los últimos 7 días) con el sensor de potencia FV y las lecturas de red, menos la potencia de todas las cargas."
         }
       }
     },
@@ -81,7 +85,9 @@
           "buy_price_sensor": "Sensor de precio de compra",
           "sell_price_sensor": "Sensor de precio de venta",
           "contracted_power": "Potencia contratada",
-          "grid_margin": "Margen del llenado con red"
+          "grid_margin": "Margen del llenado con red",
+          "solar_forecast_entries": "Entradas de previsión solar",
+          "base_load": "Consumo base"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -103,7 +109,9 @@
           "buy_price_sensor": "Precio de la energía comprada, en €/kWh, con los atributos price_00h…price_23h (por ejemplo el sensor PVPC de la integración ESIOS). Los precios de mañana se leen de price_next_day_00h… cuando se publican; hasta entonces se estima con la misma hora de hoy. Vacío: sin precios, y el llenado con red usa las últimas horas antes de cada hora límite.",
           "sell_price_sensor": "Precio de la energía exportada, en €/kWh, con los mismos atributos. Una hora con excedente esperado cuesta este precio; vacío: no cuesta nada.",
           "contracted_power": "Potencia que se puede tomar de la red. Las cargas que completan su mínimo con red nunca llevan la importación por encima de esta potencia menos el margen, ni en el plan ni en vivo. 0: desconocida, solo una carga a la vez completa con red.",
-          "grid_margin": "Potencia que se reserva por debajo de la contratada para el resto de la casa mientras hay cargas completando con red."
+          "grid_margin": "Potencia que se reserva por debajo de la contratada para el resto de la casa mientras hay cargas completando con red.",
+          "solar_forecast_entries": "Entradas de Forecast.Solar (u otras integraciones con previsión solar para el panel de Energía), sumadas: por ejemplo una por string. El excedente esperado de una hora es la previsión menos el consumo base de la casa en esa hora. Vacío, o sin datos para una hora: el excedente observado a esa hora en los últimos días.",
+          "base_load": "Consumo de la casa sin las cargas de SolarSplit que se usa en una hora con previsión antes de haberla aprendido. Se aprende por hora (mediana de los últimos 7 días) con el sensor de potencia FV y las lecturas de red, menos la potencia de todas las cargas."
         }
       }
     },
@@ -580,6 +588,14 @@
           },
           "priced": {
             "name": "Con precios"
+          },
+          "surplus_source": {
+            "name": "Fuente del excedente",
+            "state": {
+              "forecast": "Previsión solar",
+              "learned": "Excedente aprendido",
+              "none": "Ninguna"
+            }
           }
         }
       }

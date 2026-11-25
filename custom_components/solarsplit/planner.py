@@ -1,7 +1,8 @@
 """Grid hours a relay load needs to meet its minimum before its deadline, at the lowest cost.
 
-The expected surplus of every hour comes from what SolarSplit has seen on the
-last days (`SurplusProfile`). Hours with enough expected surplus count first;
+The expected surplus of every hour comes from the solar forecast less the
+house's base load learned on the last days, or, without a forecast for that
+hour, from the surplus seen on the last days (`HourlyProfile`). Hours with enough expected surplus count first;
 what is still missing is bought from the grid in the cheapest hours, preferring
 the load's window, without going over the grid capacity. Without prices the
 last hours before the deadline are used. No Home Assistant imports: times are
@@ -10,11 +11,22 @@ timestamps in seconds.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, tzinfo
 from statistics import median
 
-PROFILE_DAYS = 7  # days of surplus kept to expect the next ones
+PROFILE_DAYS = 7  # days kept to expect the next ones
 HOURS = 24
+
+# Where the expected surplus of an hour comes from.
+SOURCE_FORECAST = "forecast"  # solar forecast less the learned (or fixed) base load
+SOURCE_LEARNED = "learned"  # surplus seen at that hour on the last days
+SOURCE_NONE = "none"  # neither: no surplus expected
+SOURCES = [SOURCE_FORECAST, SOURCE_LEARNED, SOURCE_NONE]
+# Integrations whose forecast timestamps end their period (Forecast.Solar: the value
+# at 09:00 is what is produced from 08:00 to 09:00). Others give the period start.
+PERIOD_END_DOMAINS = frozenset({"forecast_solar"})
 
 
 @dataclass(frozen=True)
@@ -27,6 +39,7 @@ class Slot:
     sell: float | None  # €/kWh; None: unknown (an hour with surplus then costs nothing)
     surplus_w: float = 0.0  # expected surplus for managed loads
     estimated: bool = False  # the price is the same hour of today: tomorrow's is not published yet
+    source: str = SOURCE_NONE  # where surplus_w comes from
 
 
 @dataclass(frozen=True)
@@ -55,6 +68,7 @@ class PlannedSlot:
     cost: float | None  # €
     estimated: bool = False
     kwh: float = 0.0  # energy the load draws in it
+    source: str = SOURCE_NONE  # where the expected surplus of the slot comes from
 
 
 @dataclass(frozen=True)
@@ -65,6 +79,7 @@ class Plan:
     priced: bool  # cheapest hours; False: the last hours before the deadline
     slots: tuple[PlannedSlot, ...] = ()
     short_h: float = 0.0  # hours that fit nowhere before the deadline
+    sources: tuple[str, ...] = ()  # sources of every slot before the deadline, planned or not
 
     @property
     def cost(self) -> float | None:
@@ -82,6 +97,12 @@ class Plan:
     def grid_kwh(self) -> float:
         """Energy drawn in the hours bought from the grid."""
         return sum(slot.kwh for slot in self.slots if slot.grid)
+
+    @property
+    def source(self) -> str:
+        """Where the expected surplus came from: the forecast if any hour used it, else learned, else none."""
+        sources = {slot.source for slot in self.slots} | set(self.sources)
+        return next((source for source in SOURCES if source in sources), SOURCE_NONE)
 
     def fill_at(self, now: float) -> bool:
         """Whether the plan buys the hour that contains `now` from the grid."""
@@ -105,7 +126,7 @@ def _planned(slot: Slot, hours: float, grid: bool, left_w: float, power_w: float
     return PlannedSlot(
         slot.start, slot.end, round(hours, 4), grid, slot.buy, slot.sell,
         None if price is None else round(price, 5), None if cost is None else round(cost, 6), slot.estimated,
-        round(hours * power_w / 1000, 4),
+        round(hours * power_w / 1000, 4), slot.source,
     )
 
 
@@ -169,7 +190,10 @@ def _plan_one(now: float, slots: list[Slot], req: Request, usage: _Usage) -> Pla
         usage.grid_loads[slot.start] += 1
         usage.surplus[slot.start] = max(usage.surplus[slot.start] - req.power_w, 0.0)
         need -= take
-    return Plan(req.load_id, priced, tuple(sorted(chosen, key=lambda s: s.start)), round(max(need, 0.0), 4))
+    return Plan(
+        req.load_id, priced, tuple(sorted(chosen, key=lambda s: s.start)), round(max(need, 0.0), 4),
+        tuple(sorted({slot.source for slot, _ in usable})),
+    )
 
 
 def plan(now: float, slots: list[Slot], requests: list[Request], grid_cap: float | None) -> dict[str, Plan]:
@@ -191,8 +215,8 @@ def plan(now: float, slots: list[Slot], requests: list[Request], grid_cap: float
 
 
 @dataclass
-class SurplusProfile:
-    """Mean surplus of every hour of the last days, to expect the next ones.
+class HourlyProfile:
+    """Mean power of every hour of the last days (the surplus, or the house's base load).
 
     `days` maps a local date to 24 pairs [sum of W, samples].
     """
@@ -209,7 +233,46 @@ class SurplusProfile:
         cell[0] += max(watts, 0.0)
         cell[1] += 1
 
+    def known(self, hour: int) -> bool:
+        """Whether some of the last days have readings at this hour."""
+        return any(hours[hour][1] for hours in self.days.values())
+
     def expected(self, hour: int) -> float:
-        """Median over the last days of the mean surplus of an hour; 0 W without data."""
+        """Median over the last days of the mean power of an hour; 0 W without data."""
         means = [hours[hour][0] / hours[hour][1] for hours in self.days.values() if hours[hour][1]]
         return median(means) if means else 0.0
+
+
+def sum_forecasts(forecasts: list[tuple[Mapping[str, float], bool]], tz: tzinfo) -> dict[float, float]:
+    """Sum hourly forecasts into Wh per local hour start (a timestamp).
+
+    Each forecast is ({ISO timestamp: Wh}, period_end); with period_end the energy
+    belongs to the hour before the timestamp. Several entries (one per string) add up.
+    """
+    total: dict[float, float] = {}
+    for forecast, period_end in forecasts:
+        for key, wh in forecast.items():
+            moment = datetime.fromisoformat(key).astimezone(tz)
+            if period_end:
+                moment -= timedelta(microseconds=1)
+            start = moment.replace(minute=0, second=0, microsecond=0).timestamp()
+            total[start] = total.get(start, 0.0) + float(wh)
+    return total
+
+
+def expected_surplus(
+    hour_start: datetime, forecast: Mapping[float, float] | None, covered: set | frozenset,
+    base: HourlyProfile, base_load: float, surplus: HourlyProfile,
+) -> tuple[float, str]:
+    """Expected surplus of a local hour (W) and where it comes from.
+
+    With a forecast covering the hour's date: the forecast (0 W at an hour it does not
+    list, such as the night) less the house's base load at that hour, learned or, before
+    any history, `base_load`. Otherwise the surplus seen at that hour on the last days.
+    """
+    if forecast is not None and hour_start.date() in covered:
+        load = base.expected(hour_start.hour) if base.known(hour_start.hour) else base_load
+        return max(forecast.get(hour_start.timestamp(), 0.0) - load, 0.0), SOURCE_FORECAST
+    if surplus.known(hour_start.hour):
+        return surplus.expected(hour_start.hour), SOURCE_LEARNED
+    return 0.0, SOURCE_NONE

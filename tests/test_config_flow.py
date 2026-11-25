@@ -1,5 +1,7 @@
 """Config and options flows."""
 
+from unittest.mock import patch
+
 import pytest
 import voluptuous_serialize
 from homeassistant import config_entries
@@ -433,3 +435,21 @@ async def test_options_set_the_prices_and_the_contracted_power(hass: HomeAssista
     settings = get_settings(entry)
     assert settings["buy_price_sensor"] == "sensor.pvpc" and settings["sell_price_sensor"] is None
     assert entry.runtime_data.grid_cap == 8200
+
+
+async def test_options_choose_the_solar_forecast_entries(hass: HomeAssistant) -> None:
+    entry = await _setup_entry(hass)
+    entries = [("string_1", "String 1 (forecast_solar)"), ("string_2", "String 2 (forecast_solar)")]
+    with patch("custom_components.solarsplit.config_flow.async_forecast_entries", return_value=entries):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], _submit(result, {"solar_forecast_entries": ["string_1", "string_2"], "base_load": 350})
+        )
+    assert get_settings(entry)["solar_forecast_entries"] == ["string_1", "string_2"]
+    assert get_settings(entry)["base_load"] == 350
+    # No forecast entry to choose from (Forecast.Solar not loaded yet): the field is hidden and kept
+    with patch("custom_components.solarsplit.config_flow.async_forecast_entries", return_value=[]):
+        result = await hass.config_entries.options.async_init(entry.entry_id)
+        assert "solar_forecast_entries" not in result["data_schema"].schema
+        result = await hass.config_entries.options.async_configure(result["flow_id"], _submit(result, {}))
+    assert get_settings(entry)["solar_forecast_entries"] == ["string_1", "string_2"]

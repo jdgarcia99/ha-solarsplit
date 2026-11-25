@@ -21,6 +21,7 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_AUTO_MANAGE,
     CONF_AUTO_STATE,
+    CONF_BASE_LOAD,
     CONF_BUY_PRICE_SENSOR,
     CONF_CIRCUIT_SENSOR,
     CONF_CONDITION_ENTITY,
@@ -31,6 +32,7 @@ from .const import (
     CONF_DEADLINE,
     CONF_DEADLINE_ENTITY,
     CONF_EXPORT_SENSOR,
+    CONF_FORECAST_ENTRIES,
     CONF_GLOBAL_CONDITION,
     CONF_GRID_MARGIN,
     CONF_GRID_SENSOR,
@@ -98,6 +100,7 @@ from .const import (
     SUBENTRY_LOAD,
     URGENCY_DOMAINS,
 )
+from .forecast import async_forecast_entries
 from .settings import DEFAULTS, LOAD_DEFAULTS, get_settings
 
 POWER_SENSOR = selector.EntitySelector(
@@ -145,8 +148,23 @@ def _optional(key: str, values: dict[str, Any]) -> vol.Optional:
     return vol.Optional(key, description={"suggested_value": values.get(key)})
 
 
-def settings_schema(values: dict[str, Any]) -> vol.Schema:
-    """Schema of the global settings, shared by the config and options flows."""
+def settings_schema(values: dict[str, Any], forecasts: list[tuple[str, str]] | None = None) -> vol.Schema:
+    """Schema of the global settings, shared by the config and options flows.
+
+    `forecasts` are (entry ID, label) of the config entries with a solar forecast;
+    without any, the field is not shown and the stored entries are kept.
+    """
+    forecast: dict[Any, Any] = {}
+    if forecasts:
+        options = [selector.SelectOptionDict(value=entry_id, label=label) for entry_id, label in forecasts]
+        known = {entry_id for entry_id, _ in forecasts}
+        options += [  # chosen before and gone since: shown so they can be removed
+            selector.SelectOptionDict(value=entry_id, label=entry_id)
+            for entry_id in values[CONF_FORECAST_ENTRIES] if entry_id not in known
+        ]
+        forecast[vol.Required(CONF_FORECAST_ENTRIES, default=list(values[CONF_FORECAST_ENTRIES]))] = (
+            selector.SelectSelector(selector.SelectSelectorConfig(options=options, multiple=True))
+        )
     return vol.Schema(
         {
             _optional(CONF_GRID_SENSOR, values): POWER_SENSOR,
@@ -165,6 +183,8 @@ def settings_schema(values: dict[str, Any]) -> vol.Schema:
                 0, 100000, UnitOfPower.WATT
             ),
             vol.Required(CONF_GRID_MARGIN, default=values[CONF_GRID_MARGIN]): _number(0, 20000, UnitOfPower.WATT),
+            **forecast,
+            vol.Required(CONF_BASE_LOAD, default=values[CONF_BASE_LOAD]): _number(0, 20000, UnitOfPower.WATT),
             vol.Required(CONF_CYCLE_INTERVAL, default=values[CONF_CYCLE_INTERVAL]): _number(
                 MIN_CYCLE_INTERVAL, MAX_CYCLE_INTERVAL, UnitOfTime.SECONDS
             ),
@@ -310,7 +330,8 @@ class SolarSplitConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None and not errors:
             return self.async_create_entry(title="SolarSplit", data=user_input)
         values = {**DEFAULTS, **(user_input or {})}
-        return self.async_show_form(step_id="user", data_schema=settings_schema(values), errors=errors)
+        forecasts = await async_forecast_entries(self.hass)
+        return self.async_show_form(step_id="user", data_schema=settings_schema(values, forecasts), errors=errors)
 
     @staticmethod
     @callback
@@ -337,9 +358,12 @@ class SolarSplitOptionsFlow(OptionsFlow):
             # A cleared optional entity is missing from the input; store it as None
             # so it does not fall back to the value in the entry data.
             cleared = dict.fromkeys(OPTIONAL_ENTITIES)
-            return self.async_create_entry(data={**cleared, **user_input})
+            # No forecast entry to choose from: the field was not shown, keep the stored ones.
+            kept = {CONF_FORECAST_ENTRIES: get_settings(self.config_entry)[CONF_FORECAST_ENTRIES]}
+            return self.async_create_entry(data={**cleared, **kept, **user_input})
         values = {**get_settings(self.config_entry), **(user_input or {})}
-        return self.async_show_form(step_id="init", data_schema=settings_schema(values), errors=errors)
+        forecasts = await async_forecast_entries(self.hass)
+        return self.async_show_form(step_id="init", data_schema=settings_schema(values, forecasts), errors=errors)
 
 
 class LoadSubentryFlow(ConfigSubentryFlow):

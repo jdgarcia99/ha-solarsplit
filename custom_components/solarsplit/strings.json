@@ -27,7 +27,9 @@
           "buy_price_sensor": "Buy price sensor",
           "sell_price_sensor": "Sell price sensor",
           "contracted_power": "Contracted power",
-          "grid_margin": "Grid fill margin"
+          "grid_margin": "Grid fill margin",
+          "solar_forecast_entries": "Solar forecast entries",
+          "base_load": "Base load"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
@@ -49,7 +51,9 @@
           "buy_price_sensor": "Price of the energy bought, in €/kWh, with the attributes price_00h…price_23h (for example the PVPC sensor of the ESIOS integration). Tomorrow's prices are read from price_next_day_00h… when published; until then the same hour of today is the estimate. Empty: no prices, and grid fill uses the last hours before each deadline.",
           "sell_price_sensor": "Price of the energy exported, in €/kWh, with the same attributes. An hour with expected surplus costs this price; empty: it costs nothing.",
           "contracted_power": "Grid power you may draw. Loads filling their minimum from the grid never take the import over this power less the margin, in the plan and live. 0: unknown, only one load fills from the grid at a time.",
-          "grid_margin": "Power kept below the contracted power for the rest of the house while loads fill from the grid."
+          "grid_margin": "Power kept below the contracted power for the rest of the house while loads fill from the grid.",
+          "solar_forecast_entries": "Forecast.Solar entries (or other integrations with a solar forecast for the Energy dashboard), summed: for example one per string. The expected surplus of an hour is the forecast less the house's base load at that hour. Empty, or without data for an hour: the surplus seen at that hour on the last days.",
+          "base_load": "House consumption without SolarSplit's loads used at an hour with a forecast before that hour has been learned. It is learned per hour (median of the last 7 days) from the PV power sensor and the grid readings, less the power of every load."
         }
       }
     },
@@ -81,7 +85,9 @@
           "buy_price_sensor": "Buy price sensor",
           "sell_price_sensor": "Sell price sensor",
           "contracted_power": "Contracted power",
-          "grid_margin": "Grid fill margin"
+          "grid_margin": "Grid fill margin",
+          "solar_forecast_entries": "Solar forecast entries",
+          "base_load": "Base load"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
@@ -103,7 +109,9 @@
           "buy_price_sensor": "Price of the energy bought, in €/kWh, with the attributes price_00h…price_23h (for example the PVPC sensor of the ESIOS integration). Tomorrow's prices are read from price_next_day_00h… when published; until then the same hour of today is the estimate. Empty: no prices, and grid fill uses the last hours before each deadline.",
           "sell_price_sensor": "Price of the energy exported, in €/kWh, with the same attributes. An hour with expected surplus costs this price; empty: it costs nothing.",
           "contracted_power": "Grid power you may draw. Loads filling their minimum from the grid never take the import over this power less the margin, in the plan and live. 0: unknown, only one load fills from the grid at a time.",
-          "grid_margin": "Power kept below the contracted power for the rest of the house while loads fill from the grid."
+          "grid_margin": "Power kept below the contracted power for the rest of the house while loads fill from the grid.",
+          "solar_forecast_entries": "Forecast.Solar entries (or other integrations with a solar forecast for the Energy dashboard), summed: for example one per string. The expected surplus of an hour is the forecast less the house's base load at that hour. Empty, or without data for an hour: the surplus seen at that hour on the last days.",
+          "base_load": "House consumption without SolarSplit's loads used at an hour with a forecast before that hour has been learned. It is learned per hour (median of the last 7 days) from the PV power sensor and the grid readings, less the power of every load."
         }
       }
     },
@@ -580,6 +588,14 @@
           },
           "priced": {
             "name": "With prices"
+          },
+          "surplus_source": {
+            "name": "Surplus source",
+            "state": {
+              "forecast": "Solar forecast",
+              "learned": "Learned surplus",
+              "none": "None"
+            }
           }
         }
       }
