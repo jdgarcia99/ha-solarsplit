@@ -61,6 +61,7 @@ class Reason(StrEnum):
     WAITING_REQUEST = "waiting_request"  # an on-demand load nobody asked for: not eligible
     OUT_OF_SEASON = "out_of_season"  # the current season is not one of the load's
     SEASON_UNKNOWN = "season_unknown"  # the season entity is not usable: left as it is
+    NO_SOLAR = "no_solar"  # no solar production: surplus management does not apply, left as it is
     GRID_FILL = "grid_fill"  # its minimum needs the grid: on in one of the cheapest hours planned
     GRID_FILL_NO_PRICE = "grid_fill_no_price"  # same, without prices: in the last hours before the deadline
     GRID_LIMIT = "grid_limit"  # grid fill would take the import over the contracted power less the margin
@@ -164,6 +165,21 @@ class LoadState:
     # GRID_FILL_NO_PRICE); None otherwise. Only for relay loads.
     grid_fill: Reason | None = None
     saturated_since: float | None = None  # regulable: since when it cannot take more
+    # Solar production (the same for every load). Without it surplus management does not
+    # apply: only loads SolarSplit switched on by surplus are managed (switched off when
+    # the surplus is gone), and grid fill follows its plan. The rest are left alone.
+    solar: bool = True
+
+    @property
+    def night(self) -> bool:
+        """Whether the no-production rule leaves this load as it is."""
+        if self.solar or self.filling:
+            return False
+        if self.regulator is not None or self.kind is LoadKind.VARIABLE:
+            return True  # the water heater is TankWise's at night: its maximum back, nothing written
+        if self.on_demand and self.request:
+            return True
+        return not (self.is_on and self.owned)
 
     @property
     def effective_priority(self) -> int:
@@ -219,6 +235,7 @@ class LoadState:
             and (not self.on_demand or self.request or self.demand_off or self.season_off or self.shutdown)
             and (self.regulator is None or self.regulator.auto)
             and not self.filling
+            and not self.night
         )
 
     @property
@@ -368,6 +385,11 @@ def decide(
             continue
         if load.eligible is None:
             reasons[load.id] = Reason.CONDITION_UNKNOWN
+            continue
+        if load.night:
+            # Nothing is switched on by surplus and nothing someone else switched on is switched
+            # off; a regulable load gets its maximum back (it is not limited).
+            reasons[load.id] = Reason.NO_SOLAR
             continue
         if load.on_demand and not load.request and load.regulator is None:
             if load.demand_off:

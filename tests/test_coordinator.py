@@ -522,13 +522,13 @@ def _termo(priority: int = 2, **extra: Any) -> dict[str, Any]:
 
 async def _setup_termo(
     hass: HomeAssistant, shadow: bool = False, power: float = 1200, limit: float = 1600, mode: str = "Auto",
-    loads: list | None = None,
+    loads: list | None = None, **settings: Any,
 ) -> tuple[MockConfigEntry, list]:
     hass.states.async_set(TERMO, "on")
     hass.states.async_set(TERMO_POWER, str(power), {"unit_of_measurement": "W"})
     hass.states.async_set(LIMIT, str(limit), {"min": 0, "max": 3500, "step": 50})
     hass.states.async_set(MODE, mode, {"options": ["Apagado", "Auto", "Manual"]})
-    entry = await _setup(hass, shadow=shadow, loads=loads or [_load("Pool", POOL, 750, 1), _termo()])
+    entry = await _setup(hass, shadow=shadow, loads=loads or [_load("Pool", POOL, 750, 1), _termo()], **settings)
     return entry, async_mock_service(hass, "number", "set_value")
 
 

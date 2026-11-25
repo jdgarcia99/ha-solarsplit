@@ -29,7 +29,9 @@
           "contracted_power": "Potencia contratada",
           "grid_margin": "Margen del llenado con red",
           "solar_forecast_entries": "Entradas de previsión solar",
-          "base_load": "Consumo base"
+          "base_load": "Consumo base",
+          "solar_entity": "Entidad de producción solar",
+          "solar_threshold": "Umbral de producción solar"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -53,7 +55,9 @@
           "contracted_power": "Potencia que se puede tomar de la red. Las cargas que completan su mínimo con red nunca llevan la importación por encima de esta potencia menos el margen, ni en el plan ni en vivo. 0: desconocida, solo una carga a la vez completa con red.",
           "grid_margin": "Potencia que se reserva por debajo de la contratada para el resto de la casa mientras hay cargas completando con red.",
           "solar_forecast_entries": "Entradas de Forecast.Solar (u otras integraciones con previsión solar para el panel de Energía), sumadas: por ejemplo una por string. El excedente esperado de una hora es la previsión menos el consumo base de la casa en esa hora. Vacío, o sin datos para una hora: el excedente observado a esa hora en los últimos días.",
-          "base_load": "Consumo de la casa sin las cargas de SolarSplit que se usa en una hora con previsión antes de haberla aprendido. Se aprende por hora (mediana de los últimos 7 días) con el sensor de potencia FV y las lecturas de red, menos la potencia de todas las cargas."
+          "base_load": "Consumo de la casa sin las cargas de SolarSplit que se usa en una hora con previsión antes de haberla aprendido. Se aprende por hora (mediana de los últimos 7 días) con el sensor de potencia FV y las lecturas de red, menos la potencia de todas las cargas.",
+          "solar_entity": "Sensor binario encendido mientras hay producción solar, por ejemplo un ayudante de umbral sobre la potencia FV. Sin producción la gestión de excedentes no aplica: SolarSplit no enciende nada por excedente, deja en paz las cargas que no encendió él (peticiones bajo demanda, cargas encendidas a mano o por automatizaciones) y devuelve su máximo a las regulables; solo apaga las cargas que encendió él por excedente cuando este se acaba, y el llenado con red sigue su plan. Desconocida o no disponible: sin producción.",
+          "solar_threshold": "Sin entidad de producción solar decide el sensor de potencia FV: hay producción por encima de esta potencia, y no la hay por debajo de ella menos 50 W. Sin ninguno de los dos, la regla no se aplica."
         }
       }
     },
@@ -87,7 +91,9 @@
           "contracted_power": "Potencia contratada",
           "grid_margin": "Margen del llenado con red",
           "solar_forecast_entries": "Entradas de previsión solar",
-          "base_load": "Consumo base"
+          "base_load": "Consumo base",
+          "solar_entity": "Entidad de producción solar",
+          "solar_threshold": "Umbral de producción solar"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -111,7 +117,9 @@
           "contracted_power": "Potencia que se puede tomar de la red. Las cargas que completan su mínimo con red nunca llevan la importación por encima de esta potencia menos el margen, ni en el plan ni en vivo. 0: desconocida, solo una carga a la vez completa con red.",
           "grid_margin": "Potencia que se reserva por debajo de la contratada para el resto de la casa mientras hay cargas completando con red.",
           "solar_forecast_entries": "Entradas de Forecast.Solar (u otras integraciones con previsión solar para el panel de Energía), sumadas: por ejemplo una por string. El excedente esperado de una hora es la previsión menos el consumo base de la casa en esa hora. Vacío, o sin datos para una hora: el excedente observado a esa hora en los últimos días.",
-          "base_load": "Consumo de la casa sin las cargas de SolarSplit que se usa en una hora con previsión antes de haberla aprendido. Se aprende por hora (mediana de los últimos 7 días) con el sensor de potencia FV y las lecturas de red, menos la potencia de todas las cargas."
+          "base_load": "Consumo de la casa sin las cargas de SolarSplit que se usa en una hora con previsión antes de haberla aprendido. Se aprende por hora (mediana de los últimos 7 días) con el sensor de potencia FV y las lecturas de red, menos la potencia de todas las cargas.",
+          "solar_entity": "Sensor binario encendido mientras hay producción solar, por ejemplo un ayudante de umbral sobre la potencia FV. Sin producción la gestión de excedentes no aplica: SolarSplit no enciende nada por excedente, deja en paz las cargas que no encendió él (peticiones bajo demanda, cargas encendidas a mano o por automatizaciones) y devuelve su máximo a las regulables; solo apaga las cargas que encendió él por excedente cuando este se acaba, y el llenado con red sigue su plan. Desconocida o no disponible: sin producción.",
+          "solar_threshold": "Sin entidad de producción solar decide el sensor de potencia FV: hay producción por encima de esta potencia, y no la hay por debajo de ella menos 50 W. Sin ninguno de los dos, la regla no se aplica."
         }
       }
     },
@@ -411,7 +419,8 @@
         "state": {
           "normal": "Normal",
           "zero_injection": "Inyección cero",
-          "paused": "En pausa"
+          "paused": "En pausa",
+          "no_solar": "Sin sol"
         }
       },
       "last_decision": {
@@ -459,7 +468,8 @@
               "season_unknown": "Temporada desconocida",
               "grid_fill": "Completando el mínimo con red (horas más baratas)",
               "grid_fill_no_price": "Completando el mínimo con red (sin precios: últimas horas)",
-              "grid_limit": "El llenado con red superaría la potencia contratada"
+              "grid_limit": "El llenado con red superaría la potencia contratada",
+              "no_solar": "Sin producción solar: se deja como está"
             }
           },
           "budget": {
@@ -531,7 +541,8 @@
           "season_unknown": "Temporada desconocida",
           "grid_fill": "Completando el mínimo con red (horas más baratas)",
           "grid_fill_no_price": "Completando el mínimo con red (sin precios: últimas horas)",
-          "grid_limit": "El llenado con red superaría la potencia contratada"
+          "grid_limit": "El llenado con red superaría la potencia contratada",
+          "no_solar": "Sin producción solar: se deja como está"
         }
       },
       "on_today": {

@@ -74,6 +74,8 @@ from .const import (
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
+    CONF_SOLAR_ENTITY,
+    CONF_SOLAR_THRESHOLD,
     CONF_STALE_TIMEOUT,
     CONF_TARGET_ENTITY,
     CONF_TARGET_HOURS,
@@ -123,6 +125,7 @@ HOURS = selector.NumberSelector(
 )
 SEASON_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=SEASON_DOMAINS))
 OUTPUT_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=["sensor", "number"]))
+SOLAR_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"]))
 PRICE_SENSOR = selector.EntitySelector(selector.EntitySelectorConfig(domain=PRICE_DOMAINS))
 URGENCY_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=URGENCY_DOMAINS))
 DEADLINE_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=DEADLINE_DOMAINS))
@@ -130,7 +133,7 @@ SECTIONS = (SECTION_REGULABLE, SECTION_DAILY_TARGET, SECTION_CONTROL)
 OPTIONAL_ENTITIES = (
     CONF_GRID_SENSOR, CONF_EXPORT_SENSOR, CONF_IMPORT_SENSOR,
     CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION, CONF_SEASON_ENTITY,
-    CONF_BUY_PRICE_SENSOR, CONF_SELL_PRICE_SENSOR,
+    CONF_BUY_PRICE_SENSOR, CONF_SELL_PRICE_SENSOR, CONF_SOLAR_ENTITY,
 )
 
 
@@ -174,6 +177,10 @@ def settings_schema(values: dict[str, Any], forecasts: list[tuple[str, str]] | N
             _optional(CONF_EXPORT_SENSOR, values): POWER_SENSOR,
             _optional(CONF_IMPORT_SENSOR, values): POWER_SENSOR,
             _optional(CONF_PV_SENSOR, values): POWER_SENSOR,
+            _optional(CONF_SOLAR_ENTITY, values): SOLAR_ENTITY,
+            vol.Required(CONF_SOLAR_THRESHOLD, default=values[CONF_SOLAR_THRESHOLD]): _number(
+                0, 5000, UnitOfPower.WATT
+            ),
             _optional(CONF_ZERO_INJECTION_ENTITY, values): BOOLEAN_ENTITY,
             _optional(CONF_GLOBAL_CONDITION, values): BOOLEAN_ENTITY,
             _optional(CONF_SEASON_ENTITY, values): SEASON_ENTITY,

@@ -570,3 +570,41 @@ def test_grid_fill_stays_under_the_contracted_power() -> None:
     on = replace(load, is_on=True, off_delay=300)
     d = decide(NOW, Measurements(0, 8500), [on], cfg)
     assert (d.action, d.load_id, d.reason) == (Action.TURN_OFF, "depuradora", Reason.GRID_LIMIT)
+
+
+# Without solar production
+
+
+def test_night_leaves_alone_what_solarsplit_did_not_switch_on() -> None:
+    # Deficit at night: an on-demand AC with a request and a pump switched on by an automation stay on.
+    asked = ac(is_on=True, on_demand=True, request=True, owned=True, solar=False)
+    by_hand = pool(is_on=True, owned=False, solar=False)
+    d = decide(NOW, Measurements(0, 2000), [by_hand, asked], CFG)
+    assert d.action is Action.NONE
+    assert d.reasons == {"pool": Reason.NO_SOLAR, "ac": Reason.NO_SOLAR}
+    assert compute_budget(Measurements(0, 2000), [by_hand, asked], CFG) == -2100  # not reassigned
+
+
+def test_night_switches_off_what_solarsplit_switched_on_by_surplus() -> None:
+    mine = pool(is_on=True, owned=True, solar=False, off_delay=30, off_since=NOW - 30)
+    d = decide(NOW, Measurements(0, 400), [mine], CFG)
+    assert (d.action, d.load_id, d.reasons["pool"]) == (Action.TURN_OFF, "pool", Reason.NO_BUDGET)
+
+
+def test_night_switches_nothing_on_by_surplus() -> None:
+    d = decide(NOW, Measurements(3000, 0), [pool(solar=False)], CFG)  # a reading glitch, a battery...
+    assert d.action is Action.NONE and d.reasons["pool"] is Reason.NO_SOLAR
+
+
+def test_night_grid_fill_follows_its_plan() -> None:
+    d = decide(NOW, Measurements(0, 300), [depuradora(solar=False, grid_fill=Reason.GRID_FILL)], CFG)
+    assert (d.action, d.load_id, d.reason) == (Action.TURN_ON, "depuradora", Reason.GRID_FILL)
+
+
+def test_night_gives_a_regulable_load_its_maximum_and_writes_nothing_else() -> None:
+    lowered = replace(termo(0, current=400, lowered=True), solar=False)
+    d = decide(NOW, Measurements(0, 300), [lowered], CFG)
+    assert d.reasons["termo"] is Reason.NO_SOLAR and d.limits == {} and d.writes == {"termo": 1600}
+    at_max = replace(termo(1500), solar=False)  # heating from the grid for TankWise
+    d = decide(NOW, Measurements(0, 1500), [at_max], CFG)
+    assert d.writes == {} and compute_budget(Measurements(0, 1500), [at_max], CFG) == -1600

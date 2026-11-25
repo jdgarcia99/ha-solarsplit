@@ -29,7 +29,9 @@
           "contracted_power": "Contracted power",
           "grid_margin": "Grid fill margin",
           "solar_forecast_entries": "Solar forecast entries",
-          "base_load": "Base load"
+          "base_load": "Base load",
+          "solar_entity": "Solar production entity",
+          "solar_threshold": "Solar production threshold"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
@@ -53,7 +55,9 @@
           "contracted_power": "Grid power you may draw. Loads filling their minimum from the grid never take the import over this power less the margin, in the plan and live. 0: unknown, only one load fills from the grid at a time.",
           "grid_margin": "Power kept below the contracted power for the rest of the house while loads fill from the grid.",
           "solar_forecast_entries": "Forecast.Solar entries (or other integrations with a solar forecast for the Energy dashboard), summed: for example one per string. The expected surplus of an hour is the forecast less the house's base load at that hour. Empty, or without data for an hour: the surplus seen at that hour on the last days.",
-          "base_load": "House consumption without SolarSplit's loads used at an hour with a forecast before that hour has been learned. It is learned per hour (median of the last 7 days) from the PV power sensor and the grid readings, less the power of every load."
+          "base_load": "House consumption without SolarSplit's loads used at an hour with a forecast before that hour has been learned. It is learned per hour (median of the last 7 days) from the PV power sensor and the grid readings, less the power of every load.",
+          "solar_entity": "Binary sensor that is on while there is solar production, for example a threshold helper on the PV power. Without production surplus management does not apply: SolarSplit switches nothing on by surplus, leaves loads it did not switch on alone (on-demand requests, loads switched on by hand or by automations) and gives regulable loads their maximum back; it only switches off the loads it switched on by surplus when the surplus is gone, and grid fill follows its plan. Unknown or unavailable: no production.",
+          "solar_threshold": "Without a solar production entity, the PV power sensor decides: production above this power, and none below it less 50 W. Without either, the rule does not apply."
         }
       }
     },
@@ -87,7 +91,9 @@
           "contracted_power": "Contracted power",
           "grid_margin": "Grid fill margin",
           "solar_forecast_entries": "Solar forecast entries",
-          "base_load": "Base load"
+          "base_load": "Base load",
+          "solar_entity": "Solar production entity",
+          "solar_threshold": "Solar production threshold"
         },
         "data_description": {
           "export_sensor": "Power exported to the grid, in W. With the import sensor, instead of a signed grid sensor.",
@@ -111,7 +117,9 @@
           "contracted_power": "Grid power you may draw. Loads filling their minimum from the grid never take the import over this power less the margin, in the plan and live. 0: unknown, only one load fills from the grid at a time.",
           "grid_margin": "Power kept below the contracted power for the rest of the house while loads fill from the grid.",
           "solar_forecast_entries": "Forecast.Solar entries (or other integrations with a solar forecast for the Energy dashboard), summed: for example one per string. The expected surplus of an hour is the forecast less the house's base load at that hour. Empty, or without data for an hour: the surplus seen at that hour on the last days.",
-          "base_load": "House consumption without SolarSplit's loads used at an hour with a forecast before that hour has been learned. It is learned per hour (median of the last 7 days) from the PV power sensor and the grid readings, less the power of every load."
+          "base_load": "House consumption without SolarSplit's loads used at an hour with a forecast before that hour has been learned. It is learned per hour (median of the last 7 days) from the PV power sensor and the grid readings, less the power of every load.",
+          "solar_entity": "Binary sensor that is on while there is solar production, for example a threshold helper on the PV power. Without production surplus management does not apply: SolarSplit switches nothing on by surplus, leaves loads it did not switch on alone (on-demand requests, loads switched on by hand or by automations) and gives regulable loads their maximum back; it only switches off the loads it switched on by surplus when the surplus is gone, and grid fill follows its plan. Unknown or unavailable: no production.",
+          "solar_threshold": "Without a solar production entity, the PV power sensor decides: production above this power, and none below it less 50 W. Without either, the rule does not apply."
         }
       }
     },
@@ -411,7 +419,8 @@
         "state": {
           "normal": "Normal",
           "zero_injection": "Zero injection",
-          "paused": "Paused"
+          "paused": "Paused",
+          "no_solar": "No solar production"
         }
       },
       "last_decision": {
@@ -459,7 +468,8 @@
               "season_unknown": "Season unknown",
               "grid_fill": "Filling the minimum from the grid (cheapest hours)",
               "grid_fill_no_price": "Filling the minimum from the grid (no prices: last hours)",
-              "grid_limit": "Grid fill would exceed the contracted power"
+              "grid_limit": "Grid fill would exceed the contracted power",
+              "no_solar": "No solar production: left as it is"
             }
           },
           "budget": {
@@ -531,7 +541,8 @@
           "season_unknown": "Season unknown",
           "grid_fill": "Filling the minimum from the grid (cheapest hours)",
           "grid_fill_no_price": "Filling the minimum from the grid (no prices: last hours)",
-          "grid_limit": "Grid fill would exceed the contracted power"
+          "grid_limit": "Grid fill would exceed the contracted power",
+          "no_solar": "No solar production: left as it is"
         }
       },
       "on_today": {

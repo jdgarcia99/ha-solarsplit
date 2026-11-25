@@ -76,6 +76,8 @@ from .const import (
     CONF_SETTLE_TIME,
     CONF_SHADOW_MODE,
     CONF_SMOOTHING_WINDOW,
+    CONF_SOLAR_ENTITY,
+    CONF_SOLAR_THRESHOLD,
     CONF_STALE_TIMEOUT,
     CONF_TARGET_ENTITY,
     CONF_TARGET_HOURS,
@@ -88,6 +90,7 @@ from .const import (
     DOMAIN,
     GRID_SIGN_EXPORT_NEGATIVE,
     LOAD_TYPE_REGULABLE,
+    SOLAR_HYSTERESIS,
 )
 from .engine import (
     Action,
@@ -128,7 +131,8 @@ FORECAST_WAIT = 900  # s after the start without grid fill while the forecast ha
 MODE_NORMAL = "normal"
 MODE_ZERO_INJECTION = "zero_injection"
 MODE_PAUSED = "paused"
-MODES = [MODE_NORMAL, MODE_ZERO_INJECTION, MODE_PAUSED]
+MODE_NO_SOLAR = "no_solar"  # no solar production: only SolarSplit's own loads and grid fill are managed
+MODES = [MODE_NORMAL, MODE_ZERO_INJECTION, MODE_PAUSED, MODE_NO_SOLAR]
 
 LOAD_ON = "on"
 LOAD_OFF = "off"
@@ -352,6 +356,8 @@ class LoadMemory:
     day_on: float = 0  # s on since day_start in finished runs; the current run is added by day_time()
     request: bool = False  # on demand: someone else switched it on and nobody else switched it off
     request_settings: dict[str, Any] | None = None  # climate: what that person set, restored on switch-on
+    night_on: bool = False  # switched on by something else without solar production: manual once it returns
+    on_with_sun: bool = True  # it last went on with solar production (shadow mode: assumed ours only then)
     rearm_at: float | None = None  # Manage switches back on at this time (auto manage)
     learned: list[float] = field(default_factory=list)  # W, last jumps of its circuit when it switched
     learned_at: float | None = None  # time of the change of the last valid measurement
@@ -383,7 +389,7 @@ class LoadMemory:
 
     def observe(
         self, is_on: bool | None, state: State | None, detect_off: bool, midnight: float = 0,
-        on_demand: bool = False,
+        on_demand: bool = False, solar: bool = True,
     ) -> None:
         """Track on/off transitions with our own clock, which survives restarts.
 
@@ -393,7 +399,8 @@ class LoadMemory:
         person, an automation) marks the load as switched off until it is on again.
         An on-demand load instead starts a request when something else switches it on
         (or it is first seen on) and ends it when something else switches it off; a
-        switch-off ordered by SolarSplit keeps the request.
+        switch-off ordered by SolarSplit keeps the request. A load switched on by
+        something else without solar production is remembered (`night_on`) until it is off.
         """
         if is_on is None or state is None or is_on == self.last_seen:
             return
@@ -410,7 +417,11 @@ class LoadMemory:
             self.last_change = state.last_changed.timestamp()
         if is_on:
             self.switched_off = False
-        elif self.last_seen and detect_off and not on_demand and self.commanded is not False:
+            self.on_with_sun = solar
+            self.night_on = not solar and self.commanded is not True
+        else:
+            self.night_on = False
+        if not is_on and self.last_seen and detect_off and not on_demand and self.commanded is not False:
             self.switched_off = True
         self.last_seen = is_on
 
@@ -510,6 +521,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self._forecast_read: float | None = None  # time of the last read
         self._started = dt_util.utcnow().timestamp()  # waiting for the forecast counts from here
         self.provisional = False  # the plan lacks the forecast it should have: no grid fill yet
+        self.solar = True  # solar production in this cycle
         self.objectives: dict[str, Objective] = {}
         self.plans: dict[str, Plan] = {}
         self._plan_key: tuple | None = None  # what the plans were made from: replanned when it changes
@@ -579,6 +591,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             memory.commanded = None
             memory.switched_off = False
             memory.target_done = None
+            memory.night_on = False
         memory.managed = managed
         load = self.load(load_id)
         memory.rearm_at = _next_time(load.manage_at) if not managed and load.auto_manage else None
@@ -680,6 +693,26 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             memory.learned = [*memory.learned, round(measurement.power, 1)][-KEEP:]
             memory.learned_at = measurement.change.time
 
+    def _solar_production(self) -> bool:
+        """Whether there is solar production.
+
+        From the solar production entity (unknown: none, so nothing is switched off for
+        lack of surplus), or else from the PV sensor: on above the threshold, off below it
+        less the hysteresis. Without either the rule does not apply: always production.
+        """
+        if (entity := self.settings[CONF_SOLAR_ENTITY]) is not None:
+            return entity_is_on(self._state(entity)) is True
+        if (pv_sensor := self.settings[CONF_PV_SENSOR]) is None:
+            return True
+        if (pv := read_watts(self._state(pv_sensor))) is None:
+            return False
+        threshold = self.settings[CONF_SOLAR_THRESHOLD]
+        if pv > threshold:
+            return True
+        if pv < threshold - SOLAR_HYSTERESIS:
+            return False
+        return self.solar
+
     def _season(self) -> str | None:
         """The current season (an option of the season entity), or None if it is not usable."""
         state = self._state(self.settings[CONF_SEASON_ENTITY])
@@ -705,7 +738,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         was_on = memory.last_seen
         # In shadow mode nothing is switched by us, so every switch-off would look external.
         memory.observe(
-            is_on, state, detect_off=not self.shadow, midnight=self._midnight, on_demand=load.on_demand
+            is_on, state, detect_off=not self.shadow, midnight=self._midnight, on_demand=load.on_demand,
+            solar=self.solar,
         )
         if load.circuit_sensor and was_on is not None and is_on is not None and is_on != was_on:
             # Any switch, by SolarSplit or not: measure the jump of its circuit.
@@ -717,12 +751,14 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             (was_on and is_on is False) or (memory.rearm_at is not None and now >= memory.rearm_at)
         ):
             self.set_managed(load.id, True)
-        manual = (
-            load.respect_manual and not load.on_demand and memory.commanded is not None
-            and is_on is not None and is_on != memory.commanded
+        manual = load.respect_manual and not load.on_demand and is_on is not None and (
+            (memory.commanded is not None and is_on != memory.commanded)
+            # Switched on by someone at night and still on when the sun is back: a manual load.
+            or (memory.night_on and is_on and self.solar)
         )
-        # In shadow mode nothing was switched by us: simulate owning every load that is on.
-        owned = bool(is_on) if self.shadow else memory.commanded is True
+        # In shadow mode nothing was switched by us: simulate owning every load that is on,
+        # unless it went on without solar production (SolarSplit would not have done that).
+        owned = bool(is_on) and memory.on_with_sun if self.shadow else memory.commanded is True
         eligible = load.condition_entity is None or entity_has_state(
             self._state(load.condition_entity), load.condition_state
         )
@@ -796,6 +832,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             in_season=self._in_season(load, season),
             on_demand=load.on_demand,
             request=memory.request,
+            solar=self.solar,
             min_pending=objective.open(now),
             min_priority=load.min_priority or None,
             # Unknown urgency is not urgency: the normal order is the safe one.
@@ -914,6 +951,9 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             mode = MODE_ZERO_INJECTION  # probing is not implemented yet: the engine stays paused
         else:
             mode = MODE_NORMAL
+        self.solar = self._solar_production()
+        if mode == MODE_NORMAL and not self.solar:
+            mode = MODE_NO_SOLAR
 
         self._read_circuits(now)
         season = self._season()
@@ -929,7 +969,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         states = [self._fill(state, now) for state in states]
         decision = decide(
             now, meas, states, self.engine_config,
-            self.last_action, active=mode == MODE_NORMAL, pause_reason=pause_reason,
+            self.last_action, active=mode in (MODE_NORMAL, MODE_NO_SOLAR), pause_reason=pause_reason,
         )
         for load in self.loads:
             memory = self.memory[load.id]

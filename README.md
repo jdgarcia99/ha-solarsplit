@@ -25,6 +25,17 @@ A load only switches on after the surplus has covered it for its switch-on delay
 
 A load can have a **daily objective**: a minimum of hours guaranteed before a deadline, completed from the grid in the cheapest hours when the expected surplus is not enough, and a maximum used only with surplus (see [Objectives and grid fill](#objectives-and-grid-fill)). An **urgency entity** can put a load first for a while: for example the water heater while TankWise says its plan is at risk.
 
+### Without solar production
+
+Without solar production surplus management does not apply (mode `no_solar`). Production comes from the *Solar production entity* (a binary sensor; unknown or unavailable counts as no production, so nothing is switched off by mistake) or, without it, from the PV power sensor: production above the *Solar production threshold* (100 W), none below it less 50 W. Without either, the rule does not apply.
+
+- Loads SolarSplit did not switch on are left as they are (reason `no_solar`): on-demand loads with a request, loads switched on by hand or by other automations. Their power is not reassigned.
+- Loads SolarSplit switched on by surplus are switched off when the surplus is gone, as during the day (delays and minimum on time), so nothing stays on all night because of a decision of the integration.
+- Nothing is switched on by surplus. A load in grid fill follows its plan, and goes off when its planned hour ends or its minimum is met.
+- Regulable loads get their maximum back, if SolarSplit lowered it, and nothing else is written: the water heater is TankWise's at night.
+- When production returns, management resumes with the normal delays. A load someone switched on at night and still on is a request (on-demand loads) or manual (with *Respect manual changes*).
+- In shadow mode SolarSplit cannot know who switched a load on: it assumes it switched on the loads that went on with solar production, not those switched on at night.
+
 When the global condition goes off, SolarSplit switches off the loads it switched on itself and that respect the condition (respecting their minimum on time); loads switched by hand and loads that ignore the condition are left alone. Turning the master switch off, instead, leaves every load as it is.
 
 ### Unknown data
@@ -74,7 +85,7 @@ The **SolarSplit** device:
 | Surplus management (switch) | Master switch. Off: the loop leaves every load as it is. |
 | Available budget (sensor, W) | Budget of the last cycle. |
 | Assigned power (sensor, W) | Power of the managed loads that are on. |
-| Mode (sensor) | `normal`, `zero_injection` or `paused`. |
+| Mode (sensor) | `normal`, `zero_injection`, `paused` or `no_solar` (no solar production). |
 | Last decision (sensor) | `none`, `turn_on` or `turn_off`; attributes `load`, `reason`, `budget` and `shadow` (true if it was only simulated). |
 
 One device per load:
@@ -202,7 +213,9 @@ All settings live in the UI; there is no YAML. They can be changed later from th
 | Sign of the grid sensor | export negative | Whether the signed sensor shows export as negative or positive. |
 | Grid export sensor | none | Power exported to the grid (W). With the import sensor, instead of a signed sensor. |
 | Grid import sensor | none | Power imported from the grid (W). With the export sensor, instead of a signed sensor. |
-| PV power sensor | none | PV production (W). Needed for zero-injection mode. |
+| PV power sensor | none | PV production (W). Needed for zero-injection mode, to learn the house's base load and, without a solar production entity, to detect production. |
+| Solar production entity | none | Binary sensor on while there is solar production (for example `binary_sensor.produccion_solar`). Unknown: no production. See [Without solar production](#without-solar-production). |
+| Solar production threshold | 100 W | Without that entity: production above this PV power, none below it less 50 W. |
 | Zero-injection mode entity | none | When on, the loop probes loads instead of reading export. |
 | Global condition | none | When off, the loop switches off the loads it switched on that respect it, and leaves the rest as they are. |
 | Season entity | none | `input_select` or `select` with the current season. Loads can be limited to some of its options (see *Manual control and season*). |
