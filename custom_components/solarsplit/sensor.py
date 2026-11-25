@@ -282,7 +282,7 @@ class CostSensor(ObjectiveSensor):
         if plan is None:
             return {
                 "plan": [], "grid_hours": 0.0, "grid_kwh": 0.0, "short_hours": 0.0, "priced": None,
-                "surplus_source": None,
+                "surplus_source": None, "provisional": self.coordinator.provisional,
             }
         return {
             "plan": [
@@ -298,4 +298,5 @@ class CostSensor(ObjectiveSensor):
             "short_hours": plan.short_h,
             "priced": plan.priced,
             "surplus_source": plan.source,
+            "provisional": self.coordinator.provisional,
         }

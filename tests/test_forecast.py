@@ -24,7 +24,7 @@ from custom_components.solarsplit.forecast import (
 )
 
 from .conftest import EXPORT
-from .test_coordinator import ENTRY_ID, POOL, _cycle, _entity, _setup, _sub_id
+from .test_coordinator import ENTRY_ID, POOL, _cycle, _entity, _setup, _state, _sub_id
 from .test_objectives import BUY, _at, _objective, _plan_hours, _pump, _set_prices
 
 PV = "sensor.pv_power"
@@ -44,10 +44,10 @@ def _wh(hours: dict[int, float], days: int = 0) -> dict[float, float]:
 
 async def _forecast_setup(
     hass: HomeAssistant, memory: dict | None, hass_storage: dict[str, Any], pool: str = "off",
-    load: dict | None = None, **settings: Any,
+    load: dict | None = None, cheap: dict[int, float] | None = None, **settings: Any,
 ) -> MockConfigEntry:
-    """The pump needs 1 h before 17:00; the cheapest hour is 08:00, then 14:00."""
-    _set_prices(hass, {8: 0.04, 14: 0.05})
+    """The pump needs 1 h before 17:00; the cheapest hour is 08:00, then 14:00 (or `cheap`)."""
+    _set_prices(hass, cheap or {8: 0.04, 14: 0.05})
     if memory is not None:
         hass_storage[f"solarsplit.{ENTRY_ID}"] = {
             "version": 1, "key": f"solarsplit.{ENTRY_ID}",
@@ -236,3 +236,65 @@ async def test_plan_with_todays_prices_and_sun_at_every_hour(
     # At 09:00 the pump keeps its normal priority (3): its minimum is planned for later
     attr = hass.states.get(_entity(hass, f"{_sub_id(entry, POOL)}_load_state")).attributes
     assert attr["effective_priority"] == 3
+
+
+async def test_no_grid_fill_until_the_forecast_arrives_after_a_start(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, hass_storage: dict[str, Any]
+) -> None:
+    # 10:00 is the cheapest hour and, without the forecast, there is no sun to count on.
+    # The forecast arrives 3 minutes after the start: plenty of sun at 12:00.
+    _at(freezer, 10)
+    _set_prices(hass, {10: 0.04})
+    forecast: dict[float, float] | None = None
+    with patch(READ, side_effect=lambda hass, entries: forecast):
+        entry = await _setup(
+            hass, loads=[_pump(**{CONF_MIN_HOURS: 1, CONF_DEADLINE: "17:00:00"})],
+            **{CONF_BUY_PRICE_SENSOR: BUY, CONF_FORECAST_ENTRIES: ["forecast_1"]},
+        )
+        for _ in range(3):
+            freezer.tick(timedelta(minutes=1) - timedelta(seconds=1))
+            await _cycle(hass, entry, export=0)
+            cost = _objective(hass, entry, "objective_cost").attributes
+            assert cost["provisional"] is True and _plan_hours(hass, entry) == [(0, 10)]
+            assert _state(hass, entry, "load_reason", POOL) != "grid_fill"
+        forecast = _wh({12: 3000})
+        freezer.tick(timedelta(seconds=10))
+        await _cycle(hass, entry, export=0)
+    cost = _objective(hass, entry, "objective_cost").attributes
+    assert cost["provisional"] is False and cost["surplus_source"] == "forecast"
+    assert _plan_hours(hass, entry) == [] and _plan_hours(hass, entry, grid=False) == [(0, 12)]
+    assert _state(hass, entry, "load_reason", POOL) == "no_budget"
+
+
+async def test_grid_fill_after_15_minutes_without_the_forecast(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, hass_storage: dict[str, Any]
+) -> None:
+    # The forecast never arrives: after 15 minutes the plan made with what was learned is used.
+    _at(freezer, 10)
+    with patch(READ, return_value=None):
+        entry = await _forecast_setup(
+            hass, {"surplus": _profile(15, 300)}, hass_storage, cheap={10: 0.04},
+            **{CONF_FORECAST_ENTRIES: ["forecast_1"]},
+        )
+        await _cycle(hass, entry, export=0)
+        assert _state(hass, entry, "load_reason", POOL) == "no_budget"
+        assert _objective(hass, entry, "objective_cost").attributes["provisional"] is True
+        freezer.tick(timedelta(minutes=14))
+        await _cycle(hass, entry, export=0)
+        assert _state(hass, entry, "load_reason", POOL) == "no_budget"
+        freezer.tick(timedelta(minutes=1))
+        await _cycle(hass, entry, export=0)
+    cost = _objective(hass, entry, "objective_cost").attributes
+    assert cost["provisional"] is False and cost["surplus_source"] == "learned"
+    assert _plan_hours(hass, entry) == [(0, 10)]
+    assert _state(hass, entry, "load_reason", POOL) == "grid_fill"
+
+
+async def test_without_forecast_entries_the_plan_is_never_provisional(
+    hass: HomeAssistant, freezer: FrozenDateTimeFactory, hass_storage: dict[str, Any]
+) -> None:
+    _at(freezer, 10)
+    entry = await _forecast_setup(hass, None, hass_storage, cheap={10: 0.04})
+    await _cycle(hass, entry, export=0)
+    assert _objective(hass, entry, "objective_cost").attributes["provisional"] is False
+    assert _state(hass, entry, "load_reason", POOL) == "grid_fill"

@@ -596,6 +596,9 @@
               "learned": "Excedente aprendido",
               "none": "Ninguna"
             }
+          },
+          "provisional": {
+            "name": "Provisional"
           }
         }
       }

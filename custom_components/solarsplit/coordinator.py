@@ -123,6 +123,7 @@ STORAGE_VERSION = 1
 SAVE_DELAY = 10  # s, batch memory writes
 MARKS_MAX_GAP = 120  # s, delay marks older than this gap are dropped on restore
 FORECAST_REFRESH = 300  # s between two reads of the solar forecast
+FORECAST_WAIT = 900  # s after the start without grid fill while the forecast has not arrived
 
 MODE_NORMAL = "normal"
 MODE_ZERO_INJECTION = "zero_injection"
@@ -507,6 +508,8 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self.base = HourlyProfile()  # house's power at every hour of the last days, without SolarSplit's loads
         self.forecast: dict[float, float] | None = None  # Wh per local hour start, summed
         self._forecast_read: float | None = None  # time of the last read
+        self._started = dt_util.utcnow().timestamp()  # waiting for the forecast counts from here
+        self.provisional = False  # the plan lacks the forecast it should have: no grid fill yet
         self.objectives: dict[str, Objective] = {}
         self.plans: dict[str, Plan] = {}
         self._plan_key: tuple | None = None  # what the plans were made from: replanned when it changes
@@ -807,7 +810,12 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         if not entries:
             self.forecast = None
             return
-        if self._forecast_read is not None and now - self._forecast_read < FORECAST_REFRESH:
+        # Until it arrives (it takes a few minutes after a start) it is read every cycle,
+        # so the plan is made again as soon as it does.
+        if (
+            self.forecast is not None and self._forecast_read is not None
+            and now - self._forecast_read < FORECAST_REFRESH
+        ):
             return
         self._forecast_read = now
         self.forecast = await async_read_forecast(self.hass, entries)
@@ -877,7 +885,10 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         if current is None or not current.planned_at(now) or not state.min_pending:
             return state
         state = replace(state, planned=True)
-        if not current.fill_at(now) or state.eligible is not True or state.kind is not LoadKind.RELAY:
+        if (
+            not current.fill_at(now) or self.provisional
+            or state.eligible is not True or state.kind is not LoadKind.RELAY
+        ):
             return state
         return replace(state, grid_fill=Reason.GRID_FILL if current.priced else Reason.GRID_FILL_NO_PRICE)
 
@@ -908,6 +919,12 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         season = self._season()
         states = [self._load_state(load, global_on, now, season) for load in self.loads]
         await self._async_update_forecast(now)
+        # With forecast entries, a plan made without the forecast after a start is provisional:
+        # it may book grid hours the sun will cover. No grid fill until the forecast arrives,
+        # or for FORECAST_WAIT at most.
+        self.provisional = bool(self.settings[CONF_FORECAST_ENTRIES]) and self.forecast is None and (
+            now - self._started < FORECAST_WAIT
+        )
         self._plan(now, states)
         states = [self._fill(state, now) for state in states]
         decision = decide(

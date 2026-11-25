@@ -596,6 +596,9 @@
               "learned": "Learned surplus",
               "none": "None"
             }
+          },
+          "provisional": {
+            "name": "Provisional"
           }
         }
       }
