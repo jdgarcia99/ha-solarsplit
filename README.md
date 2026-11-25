@@ -36,6 +36,12 @@ Without solar production surplus management does not apply (mode `no_solar`). Pr
 - When production returns, management resumes with the normal delays. A load someone switched on at night and still on is a request (on-demand loads) or manual (with *Respect manual changes*).
 - In shadow mode SolarSplit cannot know who switched a load on: it assumes it switched on the loads that went on with solar production, not those switched on at night.
 
+### Maintenance window
+
+Firmware updates make devices restart or go unavailable for a few minutes, and their readings are not trustworthy meanwhile. While the *Maintenance entity* is on (for example `script.esphome_update_all_esphome_devices`, which is on while it runs) and for the *Margin after maintenance* (10 min) after it goes off, SolarSplit does not learn from the readings: neither the base load nor the surplus of each hour, nor a load's power from its circuit (a jump whose window touches the maintenance window is discarded), nor the saturation of regulable loads. Without an entity, a device of a load (any device of the load's entities) that goes unavailable and comes back within 15 minutes, or restarts (its uptime sensor goes back, or its boot time forward), opens the same window; a longer outage is unknown data, as always. Decisions and safety rules do not change: a missing or frozen grid reading is unknown after the stale data timeout. The binary sensor **Maintenance in progress** shows the window (`source`: `entity`, `unavailable` or `restart`; `until`; `devices`); *Last decision* and the plan carry a `maintenance` attribute.
+
+The hours a load's entity is unavailable are never counted as hours on.
+
 When the global condition goes off, SolarSplit switches off the loads it switched on itself and that respect the condition (respecting their minimum on time); loads switched by hand and loads that ignore the condition are left alone. Turning the master switch off, instead, leaves every load as it is.
 
 ### Unknown data
@@ -86,7 +92,8 @@ The **SolarSplit** device:
 | Available budget (sensor, W) | Budget of the last cycle. |
 | Assigned power (sensor, W) | Power of the managed loads that are on. |
 | Mode (sensor) | `normal`, `zero_injection`, `paused` or `no_solar` (no solar production). |
-| Last decision (sensor) | `none`, `turn_on` or `turn_off`; attributes `load`, `reason`, `budget` and `shadow` (true if it was only simulated). |
+| Last decision (sensor) | `none`, `turn_on` or `turn_off`; attributes `load`, `reason`, `budget`, `shadow` (true if it was only simulated) and `maintenance`. |
+| Maintenance in progress (binary sensor) | On during a [maintenance window](#maintenance-window); attributes `source`, `until` and `devices`. |
 
 One device per load:
 
@@ -231,6 +238,8 @@ All settings live in the UI; there is no YAML. They can be changed later from th
 | Settle time | 30 s | Wait after a change before the next one. |
 | Switch-on margin | 100 W | Extra power a load needs, above its own, to be switched on. |
 | Import tolerance | 150 W | Grid import tolerated before a load is switched off. |
+| Maintenance entity | none | Script, input boolean, binary sensor or switch on while devices are updated. See [Maintenance window](#maintenance-window). |
+| Margin after maintenance | 10 min | How long the maintenance window lasts after the entity goes off, a device comes back or restarts. |
 | Stale data timeout | 20 s | A non-zero grid reading not reported for longer, or both grid sensors quiet at once, counts as unknown. 0 disables the check. |
 | Shadow mode | on | Decide and publish decisions without switching any load. |
 

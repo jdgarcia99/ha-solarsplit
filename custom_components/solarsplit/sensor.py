@@ -107,6 +107,7 @@ class DecisionSensor(SolarSplitEntity, SensorEntity):
             "reason": data.decision.reason.value,
             "budget": None if data.decision.budget is None else round(data.decision.budget),
             "shadow": data.shadow,
+            "maintenance": None if data.maintenance is None else data.maintenance.source,
         }
 
 
@@ -283,6 +284,7 @@ class CostSensor(ObjectiveSensor):
             return {
                 "plan": [], "grid_hours": 0.0, "grid_kwh": 0.0, "short_hours": 0.0, "priced": None,
                 "surplus_source": None, "provisional": self.coordinator.provisional,
+                "maintenance": None if self.coordinator.window is None else self.coordinator.window.source,
             }
         return {
             "plan": [
@@ -299,4 +301,5 @@ class CostSensor(ObjectiveSensor):
             "priced": plan.priced,
             "surplus_source": plan.source,
             "provisional": self.coordinator.provisional,
+            "maintenance": None if self.coordinator.window is None else self.coordinator.window.source,
         }

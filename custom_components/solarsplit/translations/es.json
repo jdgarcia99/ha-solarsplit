@@ -31,7 +31,9 @@
           "solar_forecast_entries": "Entradas de previsión solar",
           "base_load": "Consumo base",
           "solar_entity": "Entidad de producción solar",
-          "solar_threshold": "Umbral de producción solar"
+          "solar_threshold": "Umbral de producción solar",
+          "maintenance_entity": "Entidad de mantenimiento",
+          "maintenance_margin": "Margen tras mantenimiento"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -57,7 +59,9 @@
           "solar_forecast_entries": "Entradas de Forecast.Solar (u otras integraciones con previsión solar para el panel de Energía), sumadas: por ejemplo una por string. El excedente esperado de una hora es la previsión menos el consumo base de la casa en esa hora. Vacío, o sin datos para una hora: el excedente observado a esa hora en los últimos días.",
           "base_load": "Consumo de la casa sin las cargas de SolarSplit que se usa en una hora con previsión antes de haberla aprendido. Se aprende por hora (mediana de los últimos 7 días) con el sensor de potencia FV y las lecturas de red, menos la potencia de todas las cargas.",
           "solar_entity": "Sensor binario encendido mientras hay producción solar, por ejemplo un ayudante de umbral sobre la potencia FV. Sin producción la gestión de excedentes no aplica: SolarSplit no enciende nada por excedente, deja en paz las cargas que no encendió él (peticiones bajo demanda, cargas encendidas a mano o por automatizaciones) y devuelve su máximo a las regulables; solo apaga las cargas que encendió él por excedente cuando este se acaba, y el llenado con red sigue su plan. Desconocida o no disponible: sin producción.",
-          "solar_threshold": "Sin entidad de producción solar decide el sensor de potencia FV: hay producción por encima de esta potencia, y no la hay por debajo de ella menos 50 W. Sin ninguno de los dos, la regla no se aplica."
+          "solar_threshold": "Sin entidad de producción solar decide el sensor de potencia FV: hay producción por encima de esta potencia, y no la hay por debajo de ella menos 50 W. Sin ninguno de los dos, la regla no se aplica.",
+          "maintenance_entity": "Script, input boolean, sensor binario o interruptor encendido mientras se actualizan dispositivos (por ejemplo el script que actualiza todos los dispositivos ESPHome). Mientras está encendida, y durante el margen posterior, SolarSplit no aprende de las lecturas (consumo base y excedente por hora, potencia por circuito, saturación de las regulables). Sin ella, un dispositivo de una carga que pasa a no disponible y vuelve en menos de 15 minutos, o se reinicia, abre la misma ventana. Las decisiones de seguridad no cambian.",
+          "maintenance_margin": "Minutos que dura la ventana de mantenimiento después de que la entidad se apague, un dispositivo vuelva o se reinicie: los dispositivos se reinician tras actualizarse."
         }
       }
     },
@@ -93,7 +97,9 @@
           "solar_forecast_entries": "Entradas de previsión solar",
           "base_load": "Consumo base",
           "solar_entity": "Entidad de producción solar",
-          "solar_threshold": "Umbral de producción solar"
+          "solar_threshold": "Umbral de producción solar",
+          "maintenance_entity": "Entidad de mantenimiento",
+          "maintenance_margin": "Margen tras mantenimiento"
         },
         "data_description": {
           "export_sensor": "Potencia exportada a la red, en W. Junto con el de importación, en lugar de un sensor de red con signo.",
@@ -119,7 +125,9 @@
           "solar_forecast_entries": "Entradas de Forecast.Solar (u otras integraciones con previsión solar para el panel de Energía), sumadas: por ejemplo una por string. El excedente esperado de una hora es la previsión menos el consumo base de la casa en esa hora. Vacío, o sin datos para una hora: el excedente observado a esa hora en los últimos días.",
           "base_load": "Consumo de la casa sin las cargas de SolarSplit que se usa en una hora con previsión antes de haberla aprendido. Se aprende por hora (mediana de los últimos 7 días) con el sensor de potencia FV y las lecturas de red, menos la potencia de todas las cargas.",
           "solar_entity": "Sensor binario encendido mientras hay producción solar, por ejemplo un ayudante de umbral sobre la potencia FV. Sin producción la gestión de excedentes no aplica: SolarSplit no enciende nada por excedente, deja en paz las cargas que no encendió él (peticiones bajo demanda, cargas encendidas a mano o por automatizaciones) y devuelve su máximo a las regulables; solo apaga las cargas que encendió él por excedente cuando este se acaba, y el llenado con red sigue su plan. Desconocida o no disponible: sin producción.",
-          "solar_threshold": "Sin entidad de producción solar decide el sensor de potencia FV: hay producción por encima de esta potencia, y no la hay por debajo de ella menos 50 W. Sin ninguno de los dos, la regla no se aplica."
+          "solar_threshold": "Sin entidad de producción solar decide el sensor de potencia FV: hay producción por encima de esta potencia, y no la hay por debajo de ella menos 50 W. Sin ninguno de los dos, la regla no se aplica.",
+          "maintenance_entity": "Script, input boolean, sensor binario o interruptor encendido mientras se actualizan dispositivos (por ejemplo el script que actualiza todos los dispositivos ESPHome). Mientras está encendida, y durante el margen posterior, SolarSplit no aprende de las lecturas (consumo base y excedente por hora, potencia por circuito, saturación de las regulables). Sin ella, un dispositivo de una carga que pasa a no disponible y vuelve en menos de 15 minutos, o se reinicia, abre la misma ventana. Las decisiones de seguridad no cambian.",
+          "maintenance_margin": "Minutos que dura la ventana de mantenimiento después de que la entidad se apague, un dispositivo vuelva o se reinicie: los dispositivos se reinician tras actualizarse."
         }
       }
     },
@@ -477,6 +485,14 @@
           },
           "shadow": {
             "name": "Modo sombra"
+          },
+          "maintenance": {
+            "name": "Mantenimiento",
+            "state": {
+              "entity": "Entidad de mantenimiento",
+              "unavailable": "Dispositivo no disponible",
+              "restart": "Dispositivo reiniciado"
+            }
           }
         }
       },
@@ -610,6 +626,14 @@
           },
           "provisional": {
             "name": "Provisional"
+          },
+          "maintenance": {
+            "name": "Mantenimiento",
+            "state": {
+              "entity": "Entidad de mantenimiento",
+              "unavailable": "Dispositivo no disponible",
+              "restart": "Dispositivo reiniciado"
+            }
           }
         }
       }
@@ -630,6 +654,25 @@
     "binary_sensor": {
       "request": {
         "name": "Petición activa"
+      },
+      "maintenance": {
+        "name": "Mantenimiento en curso",
+        "state_attributes": {
+          "source": {
+            "name": "Causa",
+            "state": {
+              "entity": "Entidad de mantenimiento",
+              "unavailable": "Dispositivo no disponible",
+              "restart": "Dispositivo reiniciado"
+            }
+          },
+          "until": {
+            "name": "Hasta"
+          },
+          "devices": {
+            "name": "Dispositivos"
+          }
+        }
       }
     }
   }

@@ -48,6 +48,8 @@ from .const import (
     CONF_LIMIT_THRESHOLD,
     CONF_LOAD_ENTITY,
     CONF_LOAD_TYPE,
+    CONF_MAINTENANCE_ENTITY,
+    CONF_MAINTENANCE_MARGIN,
     CONF_MANAGE_AT,
     CONF_MIN_ENTITY,
     CONF_MIN_HOURS,
@@ -92,6 +94,7 @@ from .const import (
     LOAD_DOMAINS,
     LOAD_TYPE_REGULABLE,
     LOAD_TYPES,
+    MAINTENANCE_DOMAINS,
     MAX_CYCLE_INTERVAL,
     MIN_CYCLE_INTERVAL,
     PRICE_DOMAINS,
@@ -126,6 +129,7 @@ HOURS = selector.NumberSelector(
 SEASON_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=SEASON_DOMAINS))
 OUTPUT_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=["sensor", "number"]))
 SOLAR_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=["binary_sensor", "input_boolean"]))
+MAINTENANCE_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=MAINTENANCE_DOMAINS))
 PRICE_SENSOR = selector.EntitySelector(selector.EntitySelectorConfig(domain=PRICE_DOMAINS))
 URGENCY_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=URGENCY_DOMAINS))
 DEADLINE_ENTITY = selector.EntitySelector(selector.EntitySelectorConfig(domain=DEADLINE_DOMAINS))
@@ -133,7 +137,7 @@ SECTIONS = (SECTION_REGULABLE, SECTION_DAILY_TARGET, SECTION_CONTROL)
 OPTIONAL_ENTITIES = (
     CONF_GRID_SENSOR, CONF_EXPORT_SENSOR, CONF_IMPORT_SENSOR,
     CONF_PV_SENSOR, CONF_ZERO_INJECTION_ENTITY, CONF_GLOBAL_CONDITION, CONF_SEASON_ENTITY,
-    CONF_BUY_PRICE_SENSOR, CONF_SELL_PRICE_SENSOR, CONF_SOLAR_ENTITY,
+    CONF_BUY_PRICE_SENSOR, CONF_SELL_PRICE_SENSOR, CONF_SOLAR_ENTITY, CONF_MAINTENANCE_ENTITY,
 )
 
 
@@ -206,6 +210,10 @@ def settings_schema(values: dict[str, Any], forecasts: list[tuple[str, str]] | N
             ),
             vol.Required(CONF_STALE_TIMEOUT, default=values[CONF_STALE_TIMEOUT]): _number(
                 0, 600, UnitOfTime.SECONDS
+            ),
+            _optional(CONF_MAINTENANCE_ENTITY, values): MAINTENANCE_ENTITY,
+            vol.Required(CONF_MAINTENANCE_MARGIN, default=values[CONF_MAINTENANCE_MARGIN]): _number(
+                0, 240, UnitOfTime.MINUTES
             ),
             vol.Required(CONF_SHADOW_MODE, default=values[CONF_SHADOW_MODE]): selector.BooleanSelector(),
         }

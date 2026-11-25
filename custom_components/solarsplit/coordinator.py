@@ -16,6 +16,8 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import CONF_NAME, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
@@ -50,6 +52,8 @@ from .const import (
     CONF_LIMIT_THRESHOLD,
     CONF_LOAD_ENTITY,
     CONF_LOAD_TYPE,
+    CONF_MAINTENANCE_ENTITY,
+    CONF_MAINTENANCE_MARGIN,
     CONF_MANAGE_AT,
     CONF_MIN_ENTITY,
     CONF_MIN_HOURS,
@@ -104,7 +108,7 @@ from .engine import (
     decide,
 )
 from .forecast import async_read_forecast
-from .learning import KEEP, Change, CircuitLearner, learned_power
+from .learning import AFTER_END, BEFORE, KEEP, Change, CircuitLearner, learned_power
 from .loads import (
     CLIMATE,
     async_set_limit,
@@ -117,6 +121,7 @@ from .loads import (
     read_number,
     read_watts,
 )
+from .maintenance import UPTIME_BOOT, UPTIME_SECONDS, Device, MaintenanceTracker, Window
 from .planner import HourlyProfile, Plan, Request, Slot, expected_surplus, plan
 from .settings import config_snapshot, get_settings, load_settings
 
@@ -358,6 +363,7 @@ class LoadMemory:
     request_settings: dict[str, Any] | None = None  # climate: what that person set, restored on switch-on
     night_on: bool = False  # switched on by something else without solar production: manual once it returns
     on_with_sun: bool = True  # it last went on with solar production (shadow mode: assumed ours only then)
+    gap_since: float | None = None  # its entity is unusable since then, while it was on: not counted
     rearm_at: float | None = None  # Manage switches back on at this time (auto manage)
     learned: list[float] = field(default_factory=list)  # W, last jumps of its circuit when it switched
     learned_at: float | None = None  # time of the change of the last valid measurement
@@ -389,7 +395,7 @@ class LoadMemory:
 
     def observe(
         self, is_on: bool | None, state: State | None, detect_off: bool, midnight: float = 0,
-        on_demand: bool = False, solar: bool = True,
+        on_demand: bool = False, solar: bool = True, now: float | None = None,
     ) -> None:
         """Track on/off transitions with our own clock, which survives restarts.
 
@@ -402,7 +408,18 @@ class LoadMemory:
         switch-off ordered by SolarSplit keeps the request. A load switched on by
         something else without solar production is remembered (`night_on`) until it is off.
         """
-        if is_on is None or state is None or is_on == self.last_seen:
+        if is_on is None:
+            # Unknown: a run of the load is not counted while its entity cannot be read.
+            if self.last_seen and self.gap_since is None and now is not None:
+                self.gap_since = state.last_changed.timestamp() if state is not None else now
+            return
+        if self.gap_since is not None and state is not None:
+            if self.last_seen:
+                back = state.last_changed.timestamp()
+                self.on_today -= max(back - max(self.gap_since, midnight), 0.0)
+                self.day_on -= max(back - max(self.gap_since, self.day_start or 0.0), 0.0)
+            self.gap_since = None
+        if state is None or is_on == self.last_seen:
             return
         if on_demand:
             if is_on and self.commanded is not True:
@@ -481,6 +498,7 @@ class CycleResult:
     assigned_w: float
     decision: Decision
     loads: dict[str, LoadView] = field(default_factory=dict)
+    maintenance: Window | None = None  # readings are not learned from while it lasts
 
 
 class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
@@ -522,6 +540,9 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         self._started = dt_util.utcnow().timestamp()  # waiting for the forecast counts from here
         self.provisional = False  # the plan lacks the forecast it should have: no grid fill yet
         self.solar = True  # solar production in this cycle
+        self.maintenance = MaintenanceTracker(margin=self.settings[CONF_MAINTENANCE_MARGIN] * 60)
+        self.window: Window | None = None  # maintenance window in force in this cycle
+        self._device_map: dict[str, tuple[list[str], str | None]] | None = None
         self.objectives: dict[str, Objective] = {}
         self.plans: dict[str, Plan] = {}
         self._plan_key: tuple | None = None  # what the plans were made from: replanned when it changes
@@ -689,9 +710,59 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         for measurement in self.learner.due(now):
             if measurement.power is None or measurement.change.load_id not in self.memory:
                 continue
+            change = measurement.change.time
+            if self.maintenance.overlaps(change - BEFORE, change + AFTER_END):
+                continue  # a device was being updated or restarted: not a clean jump
             memory = self.memory[measurement.change.load_id]
             memory.learned = [*memory.learned, round(measurement.power, 1)][-KEEP:]
             memory.learned_at = measurement.change.time
+
+    def _devices(self) -> dict[str, tuple[list[str], str | None]]:
+        """Devices of the loads' entities: their entities SolarSplit reads, and their uptime sensor."""
+        if self._device_map is not None:
+            return self._device_map
+        entities, devices = er.async_get(self.hass), dr.async_get(self.hass)
+        result: dict[str, tuple[list[str], str | None]] = {}
+        for load in self.loads:
+            for entity_id in (
+                load.entity_id, load.power_sensor, load.limit_entity, load.mode_entity, load.output_entity,
+                load.circuit_sensor,
+            ):
+                entry = entities.async_get(entity_id) if entity_id else None
+                if entry is None or entry.device_id is None or (device := devices.async_get(entry.device_id)) is None:
+                    continue
+                name = device.name_by_user or device.name or device.id
+                if name not in result:
+                    uptime = next((
+                        other.entity_id for other in er.async_entries_for_device(entities, device.id)
+                        if other.domain == "sensor" and (
+                            other.entity_id.endswith("uptime") or other.translation_key == "uptime"
+                            or "uptime" in (other.original_name or "").lower()
+                        )
+                    ), None)
+                    result[name] = ([], uptime)
+                result[name][0].append(entity_id)
+        self._device_map = result
+        return result
+
+    def _update_maintenance(self, now: float) -> Window | None:
+        """The maintenance window: the maintenance entity, and devices of loads unavailable or restarted."""
+        entity = self.settings[CONF_MAINTENANCE_ENTITY]
+        entity_on = None if entity is None else entity_is_on(self._state(entity))
+        readings: dict[str, Device] = {}
+        for name, (entity_ids, uptime_id) in self._devices().items():
+            available = not any(
+                (state := self._state(entity_id)) is not None and state.state == STATE_UNAVAILABLE
+                for entity_id in entity_ids
+            )
+            uptime, kind = None, UPTIME_SECONDS
+            if (state := self._state(uptime_id)) is not None and state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+                if (value := read_number(state)) is not None:
+                    uptime = value
+                elif (boot := dt_util.parse_datetime(state.state)) is not None:
+                    uptime, kind = boot.timestamp(), UPTIME_BOOT
+            readings[name] = Device(available, uptime, kind)
+        return self.maintenance.update(now, entity_on, readings)
 
     def _solar_production(self) -> bool:
         """Whether there is solar production.
@@ -739,7 +810,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         # In shadow mode nothing is switched by us, so every switch-off would look external.
         memory.observe(
             is_on, state, detect_off=not self.shadow, midnight=self._midnight, on_demand=load.on_demand,
-            solar=self.solar,
+            solar=self.solar, now=now,
         )
         if load.circuit_sensor and was_on is not None and is_on is not None and is_on != was_on:
             # Any switch, by SolarSplit or not: measure the jump of its circuit.
@@ -955,6 +1026,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
         if mode == MODE_NORMAL and not self.solar:
             mode = MODE_NO_SOLAR
 
+        self.window = self._update_maintenance(now)
         self._read_circuits(now)
         season = self._season()
         states = [self._load_state(load, global_on, now, season) for load in self.loads]
@@ -975,10 +1047,11 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             memory = self.memory[load.id]
             memory.on_since = decision.on_since.get(load.id)
             memory.off_since = decision.off_since.get(load.id)
-            memory.saturated_since = decision.saturated_since.get(load.id)
+            # In a maintenance window a regulable load's draw is not trusted: never saturated.
+            memory.saturated_since = None if self.window else decision.saturated_since.get(load.id)
             if load.id in decision.target_reached:
                 memory.target_done = self.objectives[load.id].key
-        if meas is not None:
+        if meas is not None and self.window is None:
             # What managed loads could use, even the power of grid fill: the hour's surplus.
             used = sum(state.consumption for state in states if state.controlled or state.filling)
             local = dt_util.as_local(dt_util.utc_from_timestamp(now))
@@ -999,6 +1072,7 @@ class SolarSplitCoordinator(DataUpdateCoordinator[CycleResult]):
             export_w=meas.export_w if meas else None, import_w=meas.import_w if meas else None,
             assigned_w=sum(s.consumption for s in states if s.controlled),
             decision=decision,
+            maintenance=self.window,
             loads={
                 s.id: self._view(
                     s, decision, self.memory[s.id].on_time(now, self._midnight) / 3600,

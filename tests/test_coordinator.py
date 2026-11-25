@@ -452,7 +452,7 @@ async def test_entities_get_the_label(hass: HomeAssistant) -> None:
     label = lr.async_get(hass).async_get_label_by_name("Gestión de excedentes")
     assert label is not None
     entities = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
-    assert len(entities) == 4 + 1 + 2 * 5  # loop sensors, master switch, 5 per load
+    assert len(entities) == 4 + 1 + 1 + 2 * 5  # loop sensors, master switch, maintenance, 5 per load
     assert all(label.label_id in entity.labels for entity in entities)
 
 

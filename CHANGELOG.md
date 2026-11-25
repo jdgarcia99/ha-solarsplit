@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- **Maintenance window.** New options *Maintenance entity* (a script, input boolean, binary sensor or switch that is on while devices are updated, such as the script that updates every ESPHome device; a script is on while it runs) and *Margin after maintenance* (10 min). While the entity is on and for the margin after it, SolarSplit does not learn from the readings: no base load or surplus per hour, no power from a circuit's jumps (a jump whose window touches the maintenance window is discarded) and no saturation of regulable loads. Without an entity, a device of a load (the device of any entity of the load, found in the device registry) that goes unavailable and comes back within 15 minutes, or restarts (its uptime sensor goes back, or its boot time forward), opens the same window; a device unavailable for longer is an outage, handled as unknown data. Safety decisions do not change (the stale data timeout still applies). New binary sensor *Maintenance in progress* (attributes `source`, `until`, `devices`), and a `maintenance` attribute on *Last decision* and on the plan.
+- The hours of a load whose entity is unavailable are not counted as on: a run is not counted while its state is unknown.
+
 ## 0.3.0 (unreleased)
 
 - **Daily objective with a minimum and a deadline** (relay loads, such as the pool pump). The *Daily target* section becomes *Daily objective*: minimum hours (fixed or from an entity), maximum hours used only with surplus (the former target, same keys), day start (00:00 by default, so an objective can count from the evening to the next morning), deadline (fixed, from an `input_datetime`, `time` or timestamp sensor, or the end of the day), *Priority until the minimum*, a preferred window and the hours done sensor. The hours count from the day start.
